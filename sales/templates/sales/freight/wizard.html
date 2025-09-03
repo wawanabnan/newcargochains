@@ -1,169 +1,164 @@
-{% extends "base.html" %}
-{% block title %}Freight Quotation Wizard{% endblock %}
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Freight Quotation Wizard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{font-family:system-ui,Arial,sans-serif;margin:24px}
+    .container{max-width:1100px;margin:0 auto}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    label{font-weight:600;margin-bottom:4px;display:block}
+    .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+    .toolbar{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;margin-top:16px}
+    .left{text-align:left}.center{text-align:center}.right{text-align:right}
+    .btn{padding:8px 14px;border:1px solid #ddd;background:#f7f7f7;cursor:pointer}
+    .btn-primary{background:#0d6efd;color:#fff;border-color:#0d6efd}
+    .btn-danger{background:#dc3545;color:#fff;border-color:#dc3545}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{border:1px solid #ddd;padding:8px;vertical-align:top}
+    th{background:#f5f5f5}
+    .text-end{text-align:right}
+  </style>
+</head>
+<body class="layout-fixed sidebar-expand-lg sidebar-open bg-body-tertiary">
+<div class="container">
 
-{% block content %}
-<div class="card shadow-sm border-0">
-  <div class="card-header py-2">
-    <ol class="breadcrumb mb-0">
-      <li class="breadcrumb-item {% if step == 'header' %}active{% endif %}">Header Quotation</li>
-      <li class="breadcrumb-item {% if step == 'lines' %}active{% endif %}">Cargo Detail</li>
-    </ol>
-  </div>
-
-  <div class="card-body">
-    {% if step == 'header' %}
-      <form method="post" novalidate>
-        {% csrf_token %}
-        <div class="row g-3">
-          <div class="col-12 col-md-4">
-            <label class="form-label">Date</label>
-            {{ form_header.date }} {{ form_header.date.errors }}
-          </div>
-          <div class="col-12 col-md-4">
-            <label class="form-label">Customer</label>
-            {{ form_header.customer }} {{ form_header.customer.errors }}
-          </div>
-          <div class="col-12 col-md-4">
-            <label class="form-label">Currency</label>
-            {{ form_header.currency }} {{ form_header.currency.errors }}
-          </div>
-          <div class="col-12 col-md-6">
-            <label class="form-label">Payment Term</label>
-            {{ form_header.payment_term }} {{ form_header.payment_term.errors }}
-          </div>
-          <div class="col-12">
-            <label class="form-label">Notes</label>
-            {{ form_header.notes }} {{ form_header.notes.errors }}
-          </div>
-          <div class="col-12 col-md-6">
-            <label class="form-label">Freight Types</label>
-            {{ form_header.transport_mode }} {{ form_header.transport_mode.errors }}
-          </div>
-          <div class="col-12 col-md-6">
-            <label class="form-label">Services</label>
-            {{ form_header.service_option }} {{ form_header.service_option.errors }}
-          </div>
+  {% if step == "header" %}
+    <h2>Step 1 — Quotation Header</h2>
+    <form method="post">
+      {% csrf_token %}
+      <div class="grid">
+        <div>
+          <label>Date</label>
+          {{ form_header.date }}
         </div>
-        <div class="d-flex justify-content-between mt-3">
-          <a href="{% url 'sales:freight_list' %}" class="btn btn-outline-secondary rounded-0">Cancel</a>
-          <button class="btn btn-primary rounded-0" type="submit">Next</button>
+        <div>
+          <label>Payment Term</label>
+          {{ form_header.payment_term }}
         </div>
-      </form>
+        <div style="grid-column: span 2;">
+          <label>Customer</label>
+          {{ form_header.customer }}
+        </div>
+        <div>
+          <label>Transport Mode</label>
+          {{ form_header.transport_mode }}
+        </div>
+        <div>
+          <label>Service Option</label>
+          {{ form_header.service_option }}
+        </div>
+        <div>
+          <label>Currency</label>
+          {{ form_header.currency }}
+        </div>
+        <div style="grid-column: span 2;">
+          <label>Notes</label>
+          {{ form_header.notes }}
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Next →</button>
+      </div>
+    </form>
+  {% endif %}
 
-    {% elif step == 'lines' %}
-  <form method="post" novalidate>
-    {% csrf_token %}
+  {% if step == "lines" %}
+    <h2>Step 2 — Cargo Lines</h2>
+    <form method="post" id="cargo-form">
+      {% csrf_token %}
+      {{ cargo_fs.management_form }}
 
-    {{ cargo_fs.management_form }}
-    
-    <h6 class="mb-2">Cargo Detail</h6>
-    <div class="table-responsive mb-3">
-      <table class="table table-sm align-middle">
-        <thead class="table-light">
+      <table id="lines-table">
+        <thead>
           <tr>
+            <th style="width:16%">Origin</th>
+            <th style="width:16%">Destination</th>
             <th>Description</th>
-            <th class="text-end" style="width:100px;">Qty</th>
-            <th class="text-end" style="width:120px;">Weight (kg)</th>
-            <th class="text-end" style="width:120px;">Volume (cbm)</th>
-            <th class="text-end" style="width:120px;">Price</th>
-            <th class="text-end" style="width:140px;">Amount</th>
-            <th style="width:220px;">Origin</th>
-            <th style="width:220px;">Destination</th>
+            <th style="width:10%">Weight (KG)</th>
+            <th style="width:10%">Volume (CBM)</th>
+            <th style="width:12%">Price</th>
+            <th style="width:12%">Amount</th>
           </tr>
         </thead>
-        <tbody>
-          {% for f in cargo_fs %}
-          <tr>
-            <td>{{ f.description }} {{ f.description.errors }}</td>
-            <td class="text-end">{{ f.qty }} {{ f.qty.errors }}</td>
-            <td class="text-end">{{ f.weight_kg }} {{ f.weight_kg.errors }}</td>
-            <td class="text-end">{{ f.volume_cbm }} {{ f.volume_cbm.errors }}</td>
-            <td class="text-end">{{ f.price }} {{ f.price.errors }}</td>
-            <td class="text-end">{{ f.amount }} {{ f.amount.errors }}</td>
-            <td>{{ f.origin }} {{ f.origin.errors }}</td>
-            <td>{{ f.destination }} {{ f.destination.errors }}</td>
+        <tbody id="lines-body">
+          {% for f in cargo_fs.forms %}
+          <tr class="line-row">
+            <td>{{ f.origin }}</td>
+            <td>{{ f.destination }}</td>
+            <td>{{ f.description }}</td>
+            <td class="text-end">{{ f.weight_kg }}</td>
+            <td class="text-end">{{ f.volume_cbm }}</td>
+            <td class="text-end">{{ f.price }}</td>
+            <td class="text-end">{{ f.amount }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
-    </div>
 
-     <div class="d-flex justify-content-between mt-3">
-    <a href="?step=header" class="btn btn-outline-secondary rounded-0">Back</a>
+      <div class="toolbar">
+        <div class="left">
+          <button class="btn" type="submit" name="action" value="back">← Back</button>
+        </div>
+        <div class="center">
+          <button class="btn" type="button" id="add-line">+ Add Cargo</button>
+        </div>
+        <div class="right">
+          <button class="btn" type="submit" name="action" value="cancel">Cancel</button>
+          <button class="btn btn-primary" type="submit" name="action" value="save">Save</button>
+        </div>
+      </div>
+    </form>
 
-    <div class="d-flex gap-2">
-      <button class="btn btn-outline-primary rounded-0" type="submit" name="finish" value="1">
-        Finish 
-      </button>
-      <button class="btn btn-primary rounded-0" type="submit" name="manage_charges" value="1">
-        Finish & Manage Charges
-      </button>
-    </div>
-  </div>
-  </form>
-{% endif %}
+    <!-- Template baris baru (ikuti prefix formset 'cargo') -->
+    <script type="text/template" id="empty-row-template">
+      <tr class="line-row">
+        <td><select name="cargo-__prefix__-origin" class="form-select form-select-sm border-0 bg-transparent p-0"></select></td>
+        <td><select name="cargo-__prefix__-destination" class="form-select form-select-sm border-0 bg-transparent p-0"></select></td>
+        <td><input type="text" name="cargo-__prefix__-description" class="form-control form-control-sm border-0 bg-transparent p-0"/></td>
+        <td><input type="number" step="0.001" name="cargo-__prefix__-weight_kg" class="form-control form-control-sm border-0 bg-transparent p-0 text-end"/></td>
+        <td><input type="number" step="0.001" name="cargo-__prefix__-volume_cbm" class="form-control form-control-sm border-0 bg-transparent p-0 text-end"/></td>
+        <td><input type="number" step="0.01"  name="cargo-__prefix__-price" class="form-control form-control-sm border-0 bg-transparent p-0 text-end"/></td>
+        <td><input type="number" step="0.01"  name="cargo-__prefix__-amount" class="form-control form-control-sm border-0 bg-transparent p-0 text-end"/></td>
+      </tr>
+    </script>
 
-  </div>
-</div>
-{% endblock %}
+    <script>
+    (function(){
+      const addBtn  = document.getElementById('add-line');
+      const tbody   = document.getElementById('lines-body');
+      const tmplStr = document.getElementById('empty-row-template').innerHTML;
+      const totalEl = document.getElementById('id_cargo-TOTAL_FORMS');
 
-{% block extra_js %}
-<script>
-(function(){
-  const modeSel=document.getElementById("id_transport_mode");
-  const svcSel=document.getElementById("id_service_option");
-  if(modeSel && svcSel){
-    const endpoint="{% url 'sales:freight_service_options' %}";
-    const FALLBACK = {
-      SEA:[{value:"DOOR_TO_DOOR",label:"Door to Door"},{value:"DOOR_TO_PORT",label:"Door to Port"},{value:"PORT_TO_PORT",label:"Port to Port"}],
-      AIR:[{value:"DOOR_TO_AIRPORT",label:"Door to Airport"},{value:"AIRPORT_TO_AIRPORT",label:"Airport to Airport"}],
-      LAND:[{value:"TRUCKING",label:"Trucking"}],
-    };
-    function refill(opts){
-      const prev=svcSel.value; svcSel.innerHTML="";
-      (opts||[]).forEach(o=>{
-        const el=document.createElement("option");
-        el.value=o.value; el.textContent=o.label; svcSel.appendChild(el);
+      function nextIndex(){ return parseInt(totalEl.value, 10); }
+      function cloneSelectOptions(srcSel, dstSel){ dstSel.innerHTML = srcSel.innerHTML; }
+
+      addBtn.addEventListener('click', function(){
+        const idx = nextIndex();
+        const html = tmplStr.replaceAll('__prefix__', idx.toString());
+        const temp = document.createElement('tbody'); temp.innerHTML = html.trim();
+        const newRow = temp.firstElementChild;
+
+        // copy opsi origin/destination dari baris pertama (agar queryset sama)
+        const firstRow = tbody.querySelector('tr.line-row');
+        if (firstRow){
+          const srcOrigins = firstRow.querySelectorAll('select')[0];
+          const srcDests   = firstRow.querySelectorAll('select')[1];
+          const dstOrigins = newRow.querySelectorAll('select')[0];
+          const dstDests   = newRow.querySelectorAll('select')[1];
+          if (srcOrigins && dstOrigins) cloneSelectOptions(srcOrigins, dstOrigins);
+          if (srcDests && dstDests)     cloneSelectOptions(srcDests, dstDests);
+        }
+
+        tbody.appendChild(newRow);
+        totalEl.value = idx + 1;
       });
-      if (![...svcSel.options].some(o=>o.value===prev) && svcSel.options.length){
-        svcSel.value=svcSel.options[0].value;
-      }
-    }
-    async function fetchOps(mode){
-      try{
-        const ctl = new AbortController();
-        const t=setTimeout(()=>ctl.abort(),4000);
-        const r=await fetch(endpoint+"?mode="+encodeURIComponent(mode),{headers:{"X-Requested-With":"XMLHttpRequest"},signal:ctl.signal});
-        clearTimeout(t);
-        if(!r.ok){ refill(FALLBACK[mode]||[]); return; }
-        const d=await r.json();
-        refill(d.options && d.options.length ? d.options : (FALLBACK[mode]||[]));
-      }catch(e){ refill(FALLBACK[mode]||[]); }
-    }
-    fetchOps(modeSel.value);
-    modeSel.addEventListener("change",()=>fetchOps(modeSel.value));
-  }
+    })();
+    </script>
+  {% endif %}
 
-  // Auto-calc: Cargo amount = qty * price ; Charge amount = qty * rate
-  function calcRowQtyPrice(row, qtyName, priceName, amountName){
-    const q=row.querySelector(`[name$='-${qtyName}']`);
-    const p=row.querySelector(`[name$='-${priceName}']`);
-    const a=row.querySelector(`[name$='-${amountName}']`);
-    if(!q||!p||!a) return;
-    const qv=parseFloat(q.value||'1'); const pv=parseFloat(p.value||'0');
-    a.value=((isNaN(qv)?1:qv)*(isNaN(pv)?0:pv)).toFixed(2);
-  }
-  function bind(tableSel, qtyName, priceName, amountName){
-    document.querySelectorAll(tableSel+' tbody tr').forEach(tr=>{
-      const handler=()=>calcRowQtyPrice(tr, qtyName, priceName, amountName);
-      tr.addEventListener('input', handler);
-      handler();
-    });
-  }
-  // Cargo: table pertama
-  bind('.card-body table:nth-of-type(1)', 'qty','price','amount');
-  // Charge: table kedua (rate sebagai "price")
-  bind('.card-body table:nth-of-type(2)', 'qty','rate','amount');
-})();
-</script>
-{% endblock %}
+</div>
+</body>
+</html>

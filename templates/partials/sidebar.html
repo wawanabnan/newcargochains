@@ -1,7 +1,7 @@
     <!--begin::Sidebar Brand-->
         <div class="sidebar-brand">
           <!--begin::Brand Link-->
-          <a href="./index.html" class="brand-link">
+          <a href="/" class="brand-link">
             <!--begin::Brand Image-->
             <img
               src=""
@@ -42,13 +42,13 @@
                             </a>
                           </li>
                           <li class="nav-item">
-                            <a href="./index2.html" class="nav-link">
+                            <a href="#" class="nav-link">
                               <i class="nav-icon bi bi-circle"></i>
                               <p>Ship Charter</p>
                             </a>
                           </li>
                           <li class="nav-item">
-                            <a href="./index3.html" class="nav-link">
+                            <a href="#" class="nav-link">
                               <i class="nav-icon bi bi-circle"></i>
                               <p>Transhipment</p>
                             </a>
@@ -69,13 +69,13 @@
                             </a>
                           </li>
                           <li class="nav-item">
-                            <a href="./index2.html" class="nav-link">
+                            <a href="#" class="nav-link">
                               <i class="nav-icon bi bi-circle"></i>
                               <p>Ship Charter</p>
                             </a>
                           </li>
                           <li class="nav-item">
-                            <a href="./index3.html" class="nav-link">
+                            <a href="#" class="nav-link">
                               <i class="nav-icon bi bi-circle"></i>
                               <p>Transhipment</p>
                             </a>
@@ -96,6 +96,14 @@
     </a>
   </li>
 
+        <li class="nav-item">
+              <form method="post" action="{% url 'account:logout' %}">
+              {% csrf_token %}
+              <button type="submit" class="nav-link btn btn-link text-left text-white w-100">
+               <i class="nav-icon bi bi-circle"></i>Logout
+              </button>
+            </form>
+            </li>
                
               </ul>
     </nav>

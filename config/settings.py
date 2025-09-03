@@ -17,6 +17,7 @@ INSTALLED_APPS = [
 	'django.contrib.humanize',
     "django.contrib.sites",
     'rest_framework',
+    'account',
     'settings',
     'partners',
     "sales.apps.SalesConfig",
@@ -82,9 +83,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 WKHTMLTOPDF_CMD = r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"
 
 
-#LOGIN_URL = "account:login"
-#LOGIN_REDIRECT_URL = 'account:dashboard'
-#LOGOUT_REDIRECT_URL = "account:login"
+LOGIN_URL = "account:login"
+LOGIN_REDIRECT_URL = 'account:dashboard'
+LOGOUT_REDIRECT_URL = "account:login"
 
 
 USE_L10N = True       # aktifkan localization
