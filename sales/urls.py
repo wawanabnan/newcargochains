@@ -1,5 +1,11 @@
 from django.urls import path
+from .wizard_v2 import freight_create_wizard_v2
 from . import views
+
+from .wizard_clean import freight_create_wizard_clean        # ← tambahkan ini
+from .views_detail_clean import freight_detail_clean         # ← dan ini
+from .wizard_clean import freight_create_wizard_clean, freight_detail_clean, ping_wizard
+from . import aux_api
 
 app_name = "sales"
 
@@ -21,6 +27,10 @@ urlpatterns = [
     path("orders/freight/", views.freight_order_list, name="freight_order_list"),
     path("orders/freight/<int:pk>/", views.freight_order_view, name="freight_order_view"),
     path("orders/freight/<int:pk>/generate/", views.freight_generate_order, name="freight_generate_order"),
+
+
+      path("quotations/freight/api/wizard-state/", aux_api.wizard_state, name="freight_wizard_state"),
+    path("quotations/freight/api/locations/", aux_api.location_options, name="freight_location_options"),
 
 
 ]

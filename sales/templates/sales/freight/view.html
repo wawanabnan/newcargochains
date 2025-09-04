@@ -1,77 +1,211 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Quotation {{ q.number }}</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    .container{max-width:1100px;margin:24px auto;font-family:system-ui,Arial,sans-serif}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-    .card{border:1px solid #ddd;border-radius:10px;padding:12px;margin-bottom:16px;background:#fff}
-    table{width:100%;border-collapse:collapse}
-    th,td{border:1px solid #ddd;padding:8px;vertical-align:top}
-    th{background:#f4f4f4;text-align:left}
-    .right{text-align:right}
-  </style>
-</head>
-<body class="layout-fixed sidebar-expand-lg sidebar-open bg-body-tertiary">
-<div class="container">
-  <h2>Freight Quotation {{ q.number }}</h2>
+{% extends "base.html" %}
+{% block title %}Quotation {{ q.number }}{% endblock %}
 
-  <div class="grid">
-    <div class="card">
-      <b>Date:</b> {{ q.date|date:"d M Y" }}<br>
-      <b>Payment Term:</b> {{ q.get_payment_term_display }}<br>
-      <b>Currency:</b> {{ q.currency }}
-    </div>
-    <div class="card">
-      <b>Customer:</b> {{ q.customer }}<br>
-      <b>Mode / Option:</b> {{ q.transport_mode }} / {{ q.service_option }}<br>
-      <b>Status:</b> {{ q.status }}
-    </div>
+{% block extra_css %}
+<style>
+.cc-label { color:#6c757d; font-size:.85rem; margin-bottom:.15rem; }
+.cc-val { font-weight:600; }
+.table th, .table td { vertical-align: middle; }
+.cc-total-row td { border-top:0; }
+@media print {
+  .cc-actions { display:none; }
+  .card { border:0 !important; box-shadow:none !important; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 cc-actions">
+  <div class="d-flex align-items-center gap-2">
+    <a href="{% url 'sales:freight_list' %}" class="btn btn-outline-secondary btn-sm rounded-0" data-bs-toggle="tooltip" title="Back to Quotations">
+      <i class="fa fa-arrow-left"></i> Back
+    </a>
   </div>
+  <div class="btn-group btn-group-sm">
+    <a href="{% url 'sales:freight_email' q.id %}" class="btn btn-outline-primary rounded-0" data-bs-toggle="tooltip" title="Send Email">
+      <i class="fa fa-paper-plane"></i> Email
+    </a>
+    <a href="{% url 'sales:freight_pdf' q.id %}" target="_blank"   class="btn btn-outline-dark rounded-0" data-bs-toggle="tooltip" title="Download PDF">
+      <i class="fa fa-file-pdf"></i> PDF
+    </a>
+    {% if perms.sales.add_freightorder and not q.order_id and q.cargos.all %}
+      <a class="btn btn-primary btn-sm" href="{% url 'sales:freight_generate_order' q.pk %}">
+        <i class="bi bi-magic"></i> Generate Sales Order
+      </a>
+    {% endif %}
 
-  <div class="card">
-    <h3 style="margin-top:0">Cargo Lines</h3>
-    <table>
-      <thead>
-        <tr>
-          <th style="width:18%">Origin</th>
-          <th style="width:18%">Destination</th>
-          <th>Description</th>
-          <th style="width:10%">Qty</th>
-          <th style="width:12%">Weight (KG)</th>
-          <th style="width:12%">Volume (CBM)</th>
-          <th style="width:14%">Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in cargo_rows %}
-        <tr>
-          <td>{{ row.obj.origin }}</td>
-          <td>{{ row.obj.destination }}</td>
-          <td>{{ row.obj.description }}</td>
-          <td class="right">{{ row.obj.qty }}</td>
-          <td class="right">{% if row.obj.weight_kg %}{{ row.obj.weight_kg }}{% endif %}</td>
-          <td class="right">{% if row.obj.volume_cbm %}{{ row.obj.volume_cbm }}{% endif %}</td>
-          <td class="right">{{ row.line_total|floatformat:2 }}</td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="7" class="right">No cargo lines</td></tr>
-        {% endfor %}
-      </tbody>
-      <tfoot>
-        <tr><td colspan="6" class="right"><b>Subtotal</b></td><td class="right"><b>{{ subtotal|floatformat:2 }}</b></td></tr>
-        <tr><td colspan="6" class="right"><b>VAT</b></td><td class="right"><b>{{ vat|floatformat:2 }}</b></td></tr>
-        <tr><td colspan="6" class="right"><b>Grand Total</b></td><td class="right"><b>{{ grand_total|floatformat:2 }}</b></td></tr>
-      </tfoot>
-    </table>
-  </div>
-
-  <div class="card">
-    <b>Notes:</b>
-    <div>{{ q.notes|linebreaksbr }}</div>
   </div>
 </div>
-</body>
-</html>
+
+<div class="card shadow-sm border-0">
+  <div class="card-header py-2 d-flex justify-content-between">
+    <div>
+      <strong>Quotation</strong> <span class="text-muted">/ {{ q.number }}</span>
+    </div>
+    <div>
+      {% if q.status == "CLOSED" %}
+        <span class="badge text-bg-danger">Closed</span>
+      {% elif q.status == "CONFIRMED" %}
+        <span class="badge text-bg-success">Confirmed</span>
+      {% elif q.status == "SENT" %}
+        <span class="badge text-bg-info">Sent</span>
+      {% elif q.status == "CANCELLED" %}
+        <span class="badge text-bg-danger">Cancelled</span>
+      {% else %}
+        <span class="badge text-bg-light text-muted">Draft</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-lg-4">
+        <div class="cc-label">Customer</div>
+        <div class="cc-val">{{ q.customer }}</div>
+      </div>
+      <div class="col-lg-2">
+        <div class="cc-label">Date</div>
+        <div class="cc-val">{{ q.date }}</div>
+      </div>
+      <div class="col-lg-2">
+        <div class="cc-label">Currency</div>
+        <div class="cc-val">{{ q.currency }}</div>
+      </div>
+      <div class="col-lg-2">
+        <div class="cc-label">Payment Term</div>
+        <div class="cc-val">{{ q.payment_term|default:"-" }}</div>
+      </div>
+      <div class="col-lg-2">
+        <div class="cc-label">Business</div>
+        <div class="cc-val">Freight</div>
+      </div>
+
+      <div class="col-lg-3">
+        <div class="cc-label">Mode</div>
+        <div class="cc-val">{{ q.get_transport_mode_display }}</div>
+      </div>
+      <div class="col-lg-4">
+        <div class="cc-label">Service</div>
+        <div class="cc-val">{{ q.get_service_option_display }}</div>
+      </div>
+      <div class="col-12">
+        <div class="cc-label">Notes</div>
+        <div class="cc-val">{{ q.notes|linebreaksbr|default:"-" }}</div>
+      </div>
+    </div>
+
+    <hr>
+
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead class="table-light">
+          <tr>
+            <th style="width:36px;">#</th>
+            <th>Description</th>
+            <th style="width:100px;" class="text-end">Qty</th>
+            <th style="width:120px;" class="text-end">Weight (kg)</th>
+            <th style="width:120px;" class="text-end">Volume (cbm)</th>
+            <th style="width:120px;" class="text-end">Price</th>
+            <th style="width:120px;" class="text-end">Cargo Amt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in cargo_rows %}
+          <tr>
+            <td>{{ forloop.counter }}</td>
+            <td>
+              <div class="fw-semibold">{{ row.obj.description|default:"(no description)" }}</div>
+              <div class="small text-muted">
+                {% if row.obj.origin %}Origin: {{ row.obj.origin }}{% endif %}
+                {% if row.obj.destination %} &nbsp;•&nbsp; Destination: {{ row.obj.destination }}{% endif %}
+              </div>
+            </td>
+            <td class="text-end">{{ row.obj.qty|default:"-" }}</td>
+            <td class="text-end">{{ row.obj.weight_kg|default:"-" }}</td>
+            <td class="text-end">{{ row.obj.volume_cbm|default:"-" }}</td>
+            <td class="text-end">{{ row.obj.price|floatformat:2 }}</td>
+            <td class="text-end">{{ row.obj.amount|floatformat:2 }}</td>
+          </tr>
+
+          {% if row.charges %}
+          <tr>
+            <td></td>
+            <td colspan="6" class="pt-0">
+              <table class="table table-sm mb-3">
+                <thead class="table-light">
+                  <tr>
+                    <th class="ps-4">Charge Description</th>
+                    <th style="width:100px;" class="text-end">Qty</th>
+                    <th style="width:120px;" class="text-end">Rate</th>
+                    <th style="width:120px;" class="text-end">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for ch in row.charges %}
+                  <tr>
+                    <td class="ps-4">{{ ch.description }}</td>
+                    <td class="text-end">{{ ch.qty|default:"-" }}</td>
+                    <td class="text-end">{{ ch.rate|floatformat:2 }}</td>
+                    <td class="text-end">{{ ch.amount|floatformat:2 }}</td>
+                  </tr>
+                  {% endfor %}
+                  <tr class="table-light">
+                    <td class="ps-4 text-end fw-semibold" colspan="3">Charge Total</td>
+                    <td class="text-end fw-semibold">{{ row.charge_total|floatformat:2 }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </td>
+          </tr>
+          {% endif %}
+
+          <tr class="table-active">
+            <td></td>
+            <td colspan="5" class="text-end fw-semibold">Line Total</td>
+            <td class="text-end fw-semibold">{{ row.line_total|floatformat:2 }}</td>
+          </tr>
+
+          {% empty %}
+          <tr><td colspan="7" class="text-center text-muted py-4">No cargo lines.</td></tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="5"></td>
+            <td class="text-end fw-semibold">Subtotal</td>
+            <td class="text-end fw-semibold">{{ subtotal|floatformat:2 }}</td>
+          </tr>
+          <tr>
+            <td colspan="5"></td>
+            <td class="text-end">VAT</td>
+            <td class="text-end">{{ vat|floatformat:2 }}</td>
+          </tr>
+          <tr class="table-light">
+            <td colspan="5"></td>
+            <td class="text-end fw-bold">Grand Total</td>
+            <td class="text-end fw-bold">{{ grand_total|floatformat:2 }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="d-flex justify-content-end gap-2 cc-actions">
+      <a href="{% url 'sales:freight_charges' q.id %}" class="btn btn-outline-info btn-sm rounded-0">
+        <i class="fa fa-coins"></i> Manage Charges
+      </a>
+      <a href="{% url 'sales:freight_list' %}" class="btn btn-secondary btn-sm rounded-0">
+        <i class="fa fa-list"></i> Back to Quotations
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  if (window.bootstrap) {
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el=>{
+      try { new bootstrap.Tooltip(el); } catch(e){}
+    });
+  }
+</script>
+{% endblock %}

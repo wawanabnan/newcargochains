@@ -1,0 +1,142 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Freight Wizard (Clean)</title>
+  <link rel="stylesheet" href="{% static 'adminlte/css/adminlte.css' %}">
+  <script src="{% static 'adminlte/js/adminlte.js' %}"></script>
+</head>
+<body class="layout-fixed sidebar-expand-lg bg-body-tertiary">
+<div class="container py-3">
+  <h1 class="h4 mb-3">Freight Quotation Wizard</h1>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="alert alert-{{ m.tags }} py-2">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  {% if step == "header" %}
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <form method="post" novalidate>
+          {% csrf_token %}
+          <div class="row g-3">
+            {% for field in header_form %}
+              <div class="col-md-6">
+                <label class="form-label">{{ field.label }}</label>
+                {{ field }}
+                {% if field.errors %}
+                  <div class="text-danger small">{{ field.errors|striptags }}</div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+          <div class="mt-3 d-flex gap-2">
+            <a class="btn btn-secondary" href="?reset=1">Reset</a>
+            <button class="btn btn-primary" type="submit">Next</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script src="{% static 'sales/js/fq_wizard_clean.js' %}"></script>
+  {% else %}
+    <div class="row">
+      <div class="col-lg-5">
+        <div class="card shadow-sm">
+          <div class="card-header">Tambah Cargo</div>
+          <div class="card-body">
+            <form method="post" novalidate>
+              {% csrf_token %}
+              <input type="hidden" name="action" value="add_line"/>
+              <div class="row g-3">
+                {% for field in cargo_form %}
+                  <div class="col-12">
+                    <label class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                      <div class="text-danger small">{{ field.errors|striptags }}</div>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+              <div class="mt-3 d-flex gap-2">
+                <button class="btn btn-primary" type="submit">+ Add Cargo</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        <div class="mt-2">
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="back"/>
+            <button class="btn btn-outline-secondary">Back</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="col-lg-7">
+        <div class="card shadow-sm">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Daftar Cargo</span>
+            <form method="post" class="m-0">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="finish"/>
+              <button class="btn btn-success" {% if not lines %}disabled{% endif %}>Finish / Save</button>
+            </form>
+          </div>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-sm table-striped mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th>#</th><th>Origin</th><th>Destination</th><th>Desc</th>
+                    <th class="text-end">Qty</th>
+                    <th class="text-end">Price</th>
+                    <th class="text-end">Amount</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% if lines %}
+                    {% for r in lines %}
+                      <tr>
+                        <td>{{ forloop.counter }}</td>
+                        <td>{{ r.origin }}</td>
+                        <td>{{ r.destination }}</td>
+                        <td>{{ r.description|default:"-" }}</td>
+                        <td class="text-end">{{ r.qty|default:"-" }}</td>
+                        <td class="text-end">{{ r.price|default:"-" }}</td>
+                        <td class="text-end">{{ r.amount|default:"-" }}</td>
+                        <td class="text-end">
+                          <form method="post">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="remove_line"/>
+                            <input type="hidden" name="idx" value="{{ forloop.counter0 }}"/>
+                            <button class="btn btn-sm btn-outline-danger">x</button>
+                          </form>
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  {% else %}
+                    <tr><td colspan="8" class="text-center text-muted">Belum ada cargo.</td></tr>
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mt-2">
+          <div class="card-body py-2">
+            <strong>Header (ringkas)</strong> — akan disimpan saat Finish.
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="{% static 'sales/js/fq_wizard_clean.js' %}"></script>
+  {% endif %}
+</div>
+</body>
+</html>

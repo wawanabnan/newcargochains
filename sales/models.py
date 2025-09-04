@@ -80,13 +80,13 @@ class FreightQuotation(models.Model):
     class Meta:
         ordering = ("-date", "-id")
 
-    def mark_pdf_stale(self, *, save=True):
-        self.pdf_generated_at = None
-        if self.pdf_file:
-            self.pdf_file.delete(save=False)
-            self.pdf_file = None
-        if save:
-            self.save(update_fields=["pdf_generated_at", "pdf_file"])
+    #def mark_pdf_stale(self, *, save=True):
+    #    self.pdf_generated_at = None
+    #    if self.pdf_file:
+    #        self.pdf_file.delete(save=False)
+    #        self.pdf_file = None
+    #    if save:
+    #        self.save(update_fields=["pdf_generated_at", "pdf_file"])
 
 
 class FreightCargo(models.Model):

@@ -1,164 +1,379 @@
+{% extends "base.html" %}
 {% load static %}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Freight Quotation Wizard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body{font-family:system-ui,Arial,sans-serif;margin:24px}
-    .container{max-width:1100px;margin:0 auto}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    label{font-weight:600;margin-bottom:4px;display:block}
-    .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
-    .toolbar{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;margin-top:16px}
-    .left{text-align:left}.center{text-align:center}.right{text-align:right}
-    .btn{padding:8px 14px;border:1px solid #ddd;background:#f7f7f7;cursor:pointer}
-    .btn-primary{background:#0d6efd;color:#fff;border-color:#0d6efd}
-    .btn-danger{background:#dc3545;color:#fff;border-color:#dc3545}
-    table{width:100%;border-collapse:collapse;margin-top:12px}
-    th,td{border:1px solid #ddd;padding:8px;vertical-align:top}
-    th{background:#f5f5f5}
-    .text-end{text-align:right}
-  </style>
-</head>
-<body class="layout-fixed sidebar-expand-lg sidebar-open bg-body-tertiary">
-<div class="container">
 
+{% block title %}Freight Quotation Wizard{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3 wizard">
+  <h1 class="h5 mb-3">Freight Quotation Wizard</h1>
+
+  {# ====================== STEP 1: HEADER ====================== #}
   {% if step == "header" %}
-    <h2>Step 1 — Quotation Header</h2>
-    <form method="post">
-      {% csrf_token %}
-      <div class="grid">
-        <div>
-          <label>Date</label>
-          {{ form_header.date }}
-        </div>
-        <div>
-          <label>Payment Term</label>
-          {{ form_header.payment_term }}
-        </div>
-        <div style="grid-column: span 2;">
-          <label>Customer</label>
-          {{ form_header.customer }}
-        </div>
-        <div>
-          <label>Transport Mode</label>
-          {{ form_header.transport_mode }}
-        </div>
-        <div>
-          <label>Service Option</label>
-          {{ form_header.service_option }}
-        </div>
-        <div>
-          <label>Currency</label>
-          {{ form_header.currency }}
-        </div>
-        <div style="grid-column: span 2;">
-          <label>Notes</label>
-          {{ form_header.notes }}
-        </div>
-      </div>
-      <div class="actions">
-        <button class="btn btn-primary" type="submit">Next →</button>
-      </div>
-    </form>
-  {% endif %}
+    <div class="card shadow-sm">
+      <div class="card-header">Header Information</div>
+      <div class="card-body">
+        {{ form_header.non_field_errors }}
+        <form id="header-form" method="post" novalidate>
+          {% csrf_token %}
+          <div class="row g-3">
+            <div class="col-md-3">{{ form_header.date.label_tag }}{{ form_header.date }} {{ form_header.date.errors }}</div>
+            <div class="col-md-5">{{ form_header.customer.label_tag }}{{ form_header.customer }} {{ form_header.customer.errors }}</div>
+            <div class="col-md-2">{{ form_header.currency.label_tag }}{{ form_header.currency }} {{ form_header.currency.errors }}</div>
+            <div class="col-md-2">{{ form_header.payment_term.label_tag }}{{ form_header.payment_term }} {{ form_header.payment_term.errors }}</div>
 
-  {% if step == "lines" %}
-    <h2>Step 2 — Cargo Lines</h2>
-    <form method="post" id="cargo-form">
+            <div class="col-md-3">{{ form_header.transport_mode.label_tag }}{{ form_header.transport_mode }} {{ form_header.transport_mode.errors }}</div>
+
+            <div class="col-md-3">
+              <label for="id_service_option" class="form-label">Service Option</label>
+              <select name="service_option" id="id_service_option" class="form-select">
+                <option value="">Select service option</option>
+              </select>
+              {{ form_header.service_option.errors }}
+            </div>
+
+            <div class="col-md-6">{{ form_header.notes.label_tag }}{{ form_header.notes }} {{ form_header.notes.errors }}</div>
+          </div>
+
+          <div class="mt-3 d-flex justify-content-between">
+            <a href="{% url 'sales:freight_list' %}" class="btn btn-outline-secondary rounded-0">Cancel</a>
+            <button type="submit" class="btn btn-primary rounded-0">Next → Cargo</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+  {# ====================== STEP 2: CARGO ====================== #}
+  {% elif step == "lines" %}
+    <form id="lines-form" method="post" novalidate>
       {% csrf_token %}
       {{ cargo_fs.management_form }}
 
-      <table id="lines-table">
-        <thead>
-          <tr>
-            <th style="width:16%">Origin</th>
-            <th style="width:16%">Destination</th>
-            <th>Description</th>
-            <th style="width:10%">Weight (KG)</th>
-            <th style="width:10%">Volume (CBM)</th>
-            <th style="width:12%">Price</th>
-            <th style="width:12%">Amount</th>
-          </tr>
-        </thead>
-        <tbody id="lines-body">
-          {% for f in cargo_fs.forms %}
-          <tr class="line-row">
-            <td>{{ f.origin }}</td>
-            <td>{{ f.destination }}</td>
-            <td>{{ f.description }}</td>
-            <td class="text-end">{{ f.weight_kg }}</td>
-            <td class="text-end">{{ f.volume_cbm }}</td>
-            <td class="text-end">{{ f.price }}</td>
-            <td class="text-end">{{ f.amount }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <div class="row g-3">
+        <div class="col-lg-5">
+          <div class="card shadow-sm h-100">
+            <div class="card-header">Cargo Detail</div>
+            <div class="card-body" id="add-form">
+              <div class="row g-2">
+                <div class="col-6"><label class="form-label">Origin</label>{{ cargo_fs.empty_form.origin }}</div>
+                <div class="col-6"><label class="form-label">Destination</label>{{ cargo_fs.empty_form.destination }}</div>
+                <div class="col-12"><label class="form-label">Description</label>{{ cargo_fs.empty_form.description }}</div>
+                <div class="col-4"><label class="form-label">Qty</label>{{ cargo_fs.empty_form.qty }}</div>
+                <div class="col-4"><label class="form-label">Weight (kg)</label>{{ cargo_fs.empty_form.weight_kg }}</div>
+                <div class="col-4"><label class="form-label">Volume (cbm)</label>{{ cargo_fs.empty_form.volume_cbm }}</div>
+                <div class="col-6"><label class="form-label">Price</label>{{ cargo_fs.empty_form.price }}</div>
+                <div class="col-6"><label class="form-label">Amount</label>{{ cargo_fs.empty_form.amount }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
 
-      <div class="toolbar">
-        <div class="left">
-          <button class="btn" type="submit" name="action" value="back">← Back</button>
+        <div class="col-lg-7">
+          <div class="card shadow-sm h-100">
+            <div class="card-header">Daftar Cargo</div>
+            <div class="card-body p-0">
+              <div id="empty-hint" class="p-3 text-center text-muted">Belum ada cargo.</div>
+              <div id="cargo-table-wrap" class="table-responsive d-none">
+                <table class="table table-sm table-striped align-middle mb-0">
+                  <thead class="table-light">
+                    <tr>
+                      <th style="width:48px;">#</th>
+                      <th>Desc</th>
+                      <th>Origin</th>
+                      <th>Destination</th>
+                      <th class="text-end" style="width:90px;">Qty</th>
+                      <th class="text-end" style="width:110px;">Weight</th>
+                      <th class="text-end" style="width:110px;">Volume</th>
+                      <th class="text-end" style="width:110px;">Price</th>
+                      <th class="text-end" style="width:120px;">Amount</th>
+                      <th style="width:96px;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="cargo-rows"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="center">
-          <button class="btn" type="button" id="add-line">+ Add Cargo</button>
-        </div>
-        <div class="right">
-          <button class="btn" type="submit" name="action" value="cancel">Cancel</button>
-          <button class="btn btn-primary" type="submit" name="action" value="save">Save</button>
+      </div>
+
+      <template id="cargo-row-template">
+        <tr class="cargo-row">
+          <td class="row-no"></td>
+          <td>
+            <div class="d-none">
+              {{ cargo_fs.empty_form.description }}
+              {{ cargo_fs.empty_form.qty }}
+              {{ cargo_fs.empty_form.weight_kg }}
+              {{ cargo_fs.empty_form.volume_cbm }}
+              {{ cargo_fs.empty_form.price }}
+              {{ cargo_fs.empty_form.amount }}
+              {{ cargo_fs.empty_form.origin }}
+              {{ cargo_fs.empty_form.destination }}
+            </div>
+            <span class="cell-desc"></span>
+          </td>
+          <td class="cell-origin"></td>
+          <td class="cell-destination"></td>
+          <td class="text-end cell-qty"></td>
+          <td class="text-end cell-weight"></td>
+          <td class="text-end cell-volume"></td>
+          <td class="text-end cell-price"></td>
+          <td class="text-end cell-amount"></td>
+          <td><button type="button" class="btn btn-outline-danger btn-sm rounded-0 btn-remove">Remove</button></td>
+        </tr>
+      </template>
+
+      <div class="mt-3 d-flex justify-content-between toolbar-sticky px-2 py-2 rounded-bottom">
+        <a href="?step=header" class="btn btn-outline-secondary rounded-0">← Back</a>
+        <div class="d-flex gap-2">
+          <button type="button" id="btn-add-cargo" class="btn btn-primary rounded-0">+ Add Cargo</button>
+          <button id="btn-finish" class="btn btn-success rounded-0 d-none" type="submit" name="finish" value="1">Finish / Save</button>
         </div>
       </div>
     </form>
-
-    <!-- Template baris baru (ikuti prefix formset 'cargo') -->
-    <script type="text/template" id="empty-row-template">
-      <tr class="line-row">
-        <td><select name="cargo-__prefix__-origin" class="form-select form-select-sm border-0 bg-transparent p-0"></select></td>
-        <td><select name="cargo-__prefix__-destination" class="form-select form-select-sm border-0 bg-transparent p-0"></select></td>
-        <td><input type="text" name="cargo-__prefix__-description" class="form-control form-control-sm border-0 bg-transparent p-0"/></td>
-        <td><input type="number" step="0.001" name="cargo-__prefix__-weight_kg" class="form-control form-control-sm border-0 bg-transparent p-0 text-end"/></td>
-        <td><input type="number" step="0.001" name="cargo-__prefix__-volume_cbm" class="form-control form-control-sm border-0 bg-transparent p-0 text-end"/></td>
-        <td><input type="number" step="0.01"  name="cargo-__prefix__-price" class="form-control form-control-sm border-0 bg-transparent p-0 text-end"/></td>
-        <td><input type="number" step="0.01"  name="cargo-__prefix__-amount" class="form-control form-control-sm border-0 bg-transparent p-0 text-end"/></td>
-      </tr>
-    </script>
-
-    <script>
-    (function(){
-      const addBtn  = document.getElementById('add-line');
-      const tbody   = document.getElementById('lines-body');
-      const tmplStr = document.getElementById('empty-row-template').innerHTML;
-      const totalEl = document.getElementById('id_cargo-TOTAL_FORMS');
-
-      function nextIndex(){ return parseInt(totalEl.value, 10); }
-      function cloneSelectOptions(srcSel, dstSel){ dstSel.innerHTML = srcSel.innerHTML; }
-
-      addBtn.addEventListener('click', function(){
-        const idx = nextIndex();
-        const html = tmplStr.replaceAll('__prefix__', idx.toString());
-        const temp = document.createElement('tbody'); temp.innerHTML = html.trim();
-        const newRow = temp.firstElementChild;
-
-        // copy opsi origin/destination dari baris pertama (agar queryset sama)
-        const firstRow = tbody.querySelector('tr.line-row');
-        if (firstRow){
-          const srcOrigins = firstRow.querySelectorAll('select')[0];
-          const srcDests   = firstRow.querySelectorAll('select')[1];
-          const dstOrigins = newRow.querySelectorAll('select')[0];
-          const dstDests   = newRow.querySelectorAll('select')[1];
-          if (srcOrigins && dstOrigins) cloneSelectOptions(srcOrigins, dstOrigins);
-          if (srcDests && dstDests)     cloneSelectOptions(srcDests, dstDests);
-        }
-
-        tbody.appendChild(newRow);
-        totalEl.value = idx + 1;
-      });
-    })();
-    </script>
   {% endif %}
-
 </div>
-</body>
-</html>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'adminlte/css/wizard.css2' %}">
+
+</style>
+{% endblock %}
+
+{% block extra_js %}
+{# ------ Semua JS dipusatkan di extra_js agar pasti dieksekusi ------ #}
+<script>
+(function(){
+  // ====== Helper umum ======
+  async function j(url){ const r=await fetch(url,{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}}); if(!r.ok) throw 0; return r.json(); }
+  function calcAmount(q,p){const qq=parseFloat(q||'0'),pp=parseFloat(p||'0');return(!isNaN(qq)&&!isNaN(pp))?(qq*pp).toFixed(2):'';}
+  function setHidden(root,suffix,val){const el=root.querySelector(`[name$="${suffix}"]`); if(el) el.value = val ?? ''; }
+
+  // ====== Placeholder & styling konsisten (native + Select2/TomSelect/Choices) ======
+  const customPH = {
+    "Customer":"Select customer","Currency":"Select currency","Payment Term":"Select payment term",
+    "Transport Mode":"Select transport mode","Service Option":"Select service option",
+    "Origin":"Select origin","Destination":"Select destination"
+  };
+  function guessLabel(select){
+    const col = select.closest('[class*="col-"]');
+    const lab = col?.querySelector('.form-label');
+    if (lab?.textContent) return lab.textContent.trim();
+    const aria = select.getAttribute('aria-label');
+    if (aria) return aria.trim();
+    return (select.name||select.id||'option').replace(/[_-]/g,' ').trim();
+  }
+  function applyPlaceholderNative(select){
+    if (!select || select.tagName!=='SELECT') return;
+    const label = guessLabel(select);
+    const key = Object.keys(customPH).find(k=>k.toLowerCase()===label.toLowerCase());
+    const text = key ? customPH[key] : `Select ${label.toLowerCase()}`;
+    if (!select.options.length || select.options[0].value!=="") {
+      select.insertBefore(new Option(text,""), select.firstChild);
+    } else {
+      select.options[0].text = text;
+    }
+    if (!select.value) select.value = "";
+    select.classList.add('form-select');
+  }
+  function enhanceAllSelects(root){
+    root.querySelectorAll('select').forEach(applyPlaceholderNative);
+
+    // Select2
+    if (window.jQuery && window.jQuery.fn && window.jQuery.fn.select2){
+      const $ = window.jQuery;
+      root.querySelectorAll('select').forEach(sel=>{
+        const label = guessLabel(sel);
+        const key   = Object.keys(customPH).find(k=>k.toLowerCase()===label.toLowerCase());
+        const text  = key ? customPH[key] : `Select ${label.toLowerCase()}`;
+        try{
+          if ($(sel).data('select2')) $(sel).select2('destroy');
+          $(sel).select2({ placeholder:text, allowClear:true, width:'100%' });
+          if (!sel.value) $(sel).val(null).trigger('change');
+        }catch(e){}
+      });
+    }
+    // TomSelect
+    if (window.TomSelect){
+      root.querySelectorAll('select').forEach(sel=>{
+        const label = guessLabel(sel);
+        const key   = Object.keys(customPH).find(k=>k.toLowerCase()===label.toLowerCase());
+        const text  = key ? customPH[key] : `Select ${label.toLowerCase()}`;
+        try{
+          if (sel.tomselect) sel.tomselect.destroy();
+          if (!sel.options.length || sel.options[0].value!=="") sel.insertBefore(new Option(text,""), sel.firstChild);
+          else sel.options[0].text = text;
+          new TomSelect(sel,{ placeholder:text, allowEmptyOption:true });
+          if (!sel.value) sel.value="";
+        }catch(e){}
+      });
+    }
+    // Choices.js
+    if (window.Choices){
+      root.querySelectorAll('select').forEach(sel=>{
+        const label = guessLabel(sel);
+        const key   = Object.keys(customPH).find(k=>k.toLowerCase()===label.toLowerCase());
+        const text  = key ? customPH[key] : `Select ${label.toLowerCase()}`;
+        try{
+          if (sel._choices) sel._choices.destroy();
+          if (!sel.options.length || sel.options[0].value!=="") sel.insertBefore(new Option(text,""), sel.firstChild);
+          else sel.options[0].text = text;
+          sel._choices = new Choices(sel,{ placeholderValue:text, searchEnabled:true, shouldSort:false });
+          if (!sel.value) sel.value="";
+        }catch(e){}
+      });
+    }
+  }
+
+  // ====== STEP 1: service option dinamis, date picker on focus ======
+  (function step1(){
+    const form = document.getElementById('header-form');
+    if (!form) return; // kita sedang di step 2
+    const mode = document.getElementById('id_transport_mode');
+    const svc  = document.getElementById('id_service_option');
+    const date = document.getElementById('id_date') || form.querySelector('input[type="date"]');
+
+    // date → buka picker saat focus
+    if (date) date.addEventListener('focus', ()=>{ try{ date.showPicker ? date.showPicker() : date.click(); }catch(e){} });
+
+    function resetSvc(){
+      svc.innerHTML = '<option value="">Select service option</option>';
+      svc.value = '';
+    }
+    async function loadSvc(){
+      resetSvc();
+      const m = (mode?.value||'').toUpperCase(); if(!m) return;
+      try{
+        const url = "{% url 'sales:freight_service_options' %}?mode="+encodeURIComponent(m);
+        const data = await j(url);
+        const list = Array.isArray(data) ? data : (data.options || []);
+        list.forEach(opt=>{
+          const val = (typeof opt==='object') ? (opt.value ?? opt[0]) : opt?.[0];
+          const lab = (typeof opt==='object') ? (opt.label ?? opt[1]) : opt?.[1];
+          if(!val) return; svc.add(new Option(String(lab ?? val), String(val)));
+        });
+      }catch(e){}
+      // placeholder & style konsisten
+      applyPlaceholderNative(svc);
+      enhanceAllSelects(document); // re-init jika select2/tomselect
+    }
+    if (mode) {
+      if (mode.value) loadSvc(); else resetSvc();
+      mode.addEventListener('change', loadSvc);
+    }
+
+    // konsistensi tampilan/placeholder semua select step 1
+    enhanceAllSelects(form);
+  })();
+
+  // ====== STEP 2: OD hydrate; add/remove cargo; tombol Finish ======
+  (function step2(){
+    const form      = document.getElementById('lines-form');
+    if (!form) return; // kita sedang di step 1
+    const addForm   = document.getElementById('add-form');
+    const addBtn    = document.getElementById('btn-add-cargo');
+    const finishBtn = document.getElementById('btn-finish');
+    const rowsWrap  = document.getElementById('cargo-rows');
+    const tableWrap = document.getElementById('cargo-table-wrap');
+    const emptyHint = document.getElementById('empty-hint');
+    const tmpl      = document.getElementById('cargo-row-template');
+    const totalInp  = document.getElementById('id_cargo-TOTAL_FORMS');
+    if (!addForm || !addBtn || !rowsWrap || !tmpl || !totalInp) return;
+
+    const URL_STATE = "{% url 'sales:freight_wizard_state' %}";
+    const URL_LOC   = "{% url 'sales:freight_location_options' %}";
+
+    const fOrigin = addForm.querySelector('select[name$="-origin"]');
+    const fDest   = addForm.querySelector('select[name$="-destination"]');
+    const fDesc   = addForm.querySelector('[name$="-description"]');
+    const fQty    = addForm.querySelector('[name$="-qty"]');
+    const fW      = addForm.querySelector('[name$="-weight_kg"]');
+    const fV      = addForm.querySelector('[name$="-volume_cbm"]');
+    const fP      = addForm.querySelector('[name$="-price"]');
+    const fA      = addForm.querySelector('[name$="-amount"]');
+
+    function fillSelect(sel, names, text){
+      if(!sel) return;
+      sel.innerHTML = '';
+      sel.add(new Option(text, ''));
+      (names||[]).forEach(n => sel.add(new Option(String(n), String(n))));
+      sel.value = ''; // user wajib pilih
+      applyPlaceholderNative(sel);
+      enhanceAllSelects(addForm); // jika ada select2/tomselect
+    }
+    async function hydrateOD(){
+      try{
+        const st = await j(URL_STATE);
+        const o = await j(URL_LOC + "?role=origin&mode="+encodeURIComponent(st.mode||'')+"&service="+encodeURIComponent(st.service||''));
+        const d = await j(URL_LOC + "?role=destination&mode="+encodeURIComponent(st.mode||'')+"&service="+encodeURIComponent(st.service||''));
+        fillSelect(fOrigin, o.items||[], "Select origin");
+        fillSelect(fDest,   d.items||[], "Select destination");
+      }catch(e){
+        fillSelect(fOrigin, [], "Select origin");
+        fillSelect(fDest,   [], "Select destination");
+      }
+    }
+
+    function revealRightBox(){ emptyHint.classList.add('d-none'); tableWrap.classList.remove('d-none'); finishBtn.classList.remove('d-none'); }
+    function getPrefix(){ const m=(totalInp.id||'').match(/^id_(.+)-TOTAL_FORMS$/); return m?m[1]:'cargo'; }
+    function reindexRows(){
+      const prefix=getPrefix();
+      const rows=[...rowsWrap.querySelectorAll('tr.cargo-row')];
+      rows.forEach((row,i)=>{
+        const no=row.querySelector('.row-no'); if(no) no.textContent=String(i+1);
+        row.querySelectorAll('.d-none [name]').forEach(el=>{
+          el.name = el.name.replace(new RegExp(`^${prefix}-\\d+-`), `${prefix}-${i}-`);
+        });
+        row.querySelectorAll('.d-none [id]').forEach(el=>{
+          el.id   = el.id.replace(new RegExp(`^id_${prefix}-\\d+-`), `id_${prefix}-${i}-`);
+        });
+      });
+      totalInp.value = String(rows.length);
+      if (rows.length===0){ tableWrap.classList.add('d-none'); finishBtn.classList.add('d-none'); emptyHint.classList.remove('d-none'); }
+    }
+
+    function addRow(){
+      if (!fOrigin.value || !fDest.value || !fDesc.value){
+        alert('Origin, Destination, dan Description wajib diisi.'); return;
+      }
+      const idx = parseInt(totalInp.value||'0',10);
+      const html = tmpl.innerHTML.replaceAll('__prefix__', String(idx));
+      const holder = document.createElement('tbody'); holder.innerHTML = html.trim();
+      const row = holder.firstElementChild;
+
+      const root = row.querySelector('.d-none');
+      const amountVal = fA.value || calcAmount(fQty.value, fP.value);
+      setHidden(root,'-origin',fOrigin.value); setHidden(root,'-destination',fDest.value);
+      setHidden(root,'-description',fDesc.value); setHidden(root,'-qty',fQty.value);
+      setHidden(root,'-weight_kg',fW.value); setHidden(root,'-volume_cbm',fV.value);
+      setHidden(root,'-price',fP.value); setHidden(root,'-amount',amountVal);
+
+      row.querySelector('.cell-desc').textContent        = fDesc.value||'';
+      row.querySelector('.cell-origin').textContent      = fOrigin.value||'';
+      row.querySelector('.cell-destination').textContent = fDest.value||'';
+      row.querySelector('.cell-qty').textContent         = fQty.value||'0';
+      row.querySelector('.cell-weight').textContent      = fW.value||'0';
+      row.querySelector('.cell-volume').textContent      = fV.value||'0';
+      row.querySelector('.cell-price').textContent       = fP.value||'0';
+      row.querySelector('.cell-amount').textContent      = amountVal||'0';
+
+      rowsWrap.appendChild(row);
+      revealRightBox();
+      reindexRows();
+    }
+
+    rowsWrap.addEventListener('click', (ev)=>{
+      const btn = ev.target.closest('.btn-remove'); if(!btn) return;
+      btn.closest('tr.cargo-row')?.remove();
+      reindexRows();
+    });
+
+    // init step 2
+    hydrateOD();
+    enhanceAllSelects(form); // jaga placeholder/style awal
+    document.getElementById('btn-add-cargo')?.addEventListener('click', addRow);
+  })();
+})();
+</script>
+{% endblock %}

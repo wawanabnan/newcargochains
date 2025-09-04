@@ -1,0 +1,488 @@
+{% extends "base.html" %}
+
+{% block title %}Freight Quotation Wizard{% endblock %}
+
+{% block content %}
+<style>
+/* ===== UI polish untuk konsistensi input/select ===== */
+.wizard .form-control,
+.wizard .form-select { padding-left: .6rem; padding-right: .6rem; }
+.wizard .form-label { margin-bottom: .25rem; }
+.wizard .toolbar-sticky {
+  position: sticky; bottom: 0; z-index: 10; background: var(--bs-body-bg, #fff);
+  border-top: 1px solid rgba(0,0,0,.08);
+}
+.wizard .toolbar-sticky .btn { min-width: 110px; }
+</style>
+<div id="wiz-proof" data-ver="wiz-0904-01" style="position:fixed;right:8px;bottom:8px;background:#000;color:#fff;padding:.25rem .5rem;font-size:.75rem;opacity:.6;z-index:9999">wiz-0904-01</div>
+
+<div class="container-fluid py-3 wizard">
+  <h1 class="h5 mb-3">Freight Quotation Wizard</h1>
+
+  {# ====================== STEP 1: HEADER ====================== #}
+  {% if step == "header" %}
+    <div class="card shadow-sm">
+      <div class="card-header">Header Information</div>
+      <div class="card-body">
+        {{ form_header.non_field_errors }}
+        <form id="header-form" method="post" novalidate>
+          {% csrf_token %}
+          <div class="row g-3">
+            <div class="col-md-3">
+              {{ form_header.date.label_tag }}{{ form_header.date }} {{ form_header.date.errors }}
+            </div>
+            <div class="col-md-5">
+              {{ form_header.customer.label_tag }}{{ form_header.customer }} {{ form_header.customer.errors }}
+            </div>
+            <div class="col-md-2">
+              {{ form_header.currency.label_tag }}{{ form_header.currency }} {{ form_header.currency.errors }}
+            </div>
+            <div class="col-md-2">
+              {{ form_header.payment_term.label_tag }}{{ form_header.payment_term }} {{ form_header.payment_term.errors }}
+            </div>
+
+            <div class="col-md-3">
+              {{ form_header.transport_mode.label_tag }}{{ form_header.transport_mode }} {{ form_header.transport_mode.errors }}
+            </div>
+            <div class="col-md-3">
+              <label for="id_service_option" class="form-label">Service Option</label>
+              <select name="service_option" id="id_service_option" class="form-select">
+                <option value="">Select service option</option>
+              </select>
+              {{ form_header.service_option.errors }}
+            </div>
+
+            <div class="col-md-6">
+              {{ form_header.notes.label_tag }}{{ form_header.notes }} {{ form_header.notes.errors }}
+            </div>
+          </div>
+
+          <div class="mt-3 d-flex justify-content-between toolbar-sticky px-2 py-2 rounded-bottom">
+            <a href="{% url 'sales:freight_list' %}" class="btn btn-outline-secondary rounded-0">Cancel</a>
+            <button type="submit" class="btn btn-primary rounded-0">Next → Cargo</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+    (function(){
+      const form  = document.getElementById('header-form');
+      const date  = document.getElementById('id_date') || document.querySelector('[name="date"]');
+      const cust  = document.getElementById('id_customer');
+      const curr  = document.getElementById('id_currency');
+      const pterm = document.getElementById('id_payment_term');
+      const mode  = document.getElementById('id_transport_mode');
+      const svc   = document.getElementById('id_service_option');
+
+      // ------ placeholder khusus dropdown header ------
+      function ensurePlaceholder(sel, text){
+        if(!sel) return;
+        const first = sel.options[0];
+        if(!first || first.value !== ""){
+          const opt = new Option(text, "");
+          sel.insertBefore(opt, sel.firstChild);
+        } else {
+          first.textContent = text;
+        }
+        if (!sel.value) sel.value = ""; // force empty value
+      }
+      ensurePlaceholder(cust,  "Select customer");
+      ensurePlaceholder(curr,  "Select currency");
+      ensurePlaceholder(pterm, "Select payment term");
+      ensurePlaceholder(mode,  "Select transport mode");
+      // service option diisi via AJAX di bawah
+
+      // ------ Date: fokus memunculkan date-picker ------
+      if (date) {
+        date.addEventListener('focus', function(){
+          try { if (date.showPicker) date.showPicker(); else date.click(); } catch(e){ /* ignore */ }
+        });
+      }
+
+      // ====== Service Option dinamis by Transport Mode ======
+      function resetSvc(){
+        svc.innerHTML = '<option value="">Select service option</option>';
+        svc.value = '';
+      }
+      async function loadSvc(){
+        resetSvc();
+        const m = (mode?.value || '').toUpperCase();
+        if(!m) return;
+        try{
+          const url = "{% url 'sales:freight_service_options' %}?mode=" + encodeURIComponent(m);
+          const r = await fetch(url, {credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
+          const data = await r.json();
+          const list = Array.isArray(data) ? data : (data.options || []);
+          for(const opt of list){
+            const val = (typeof opt==='object') ? (opt.value ?? opt[0]) : opt?.[0];
+            const lab = (typeof opt==='object') ? (opt.label ?? opt[1]) : opt?.[1];
+            if(!val) continue;
+            svc.add(new Option(String(lab ?? val), String(val)));
+          }
+          // restore dari storage kalau ada
+          const st = JSON.parse(sessionStorage.getItem('fq_header') || '{}');
+          if (st.service_option && [...svc.options].some(o=>o.value===st.service_option)) {
+            svc.value = st.service_option;
+          }
+        }catch(e){ /* keep placeholder */ }
+      }
+
+      // ====== Persist Header (agar saat Back nilainya tetap) ======
+      const storageKey = 'fq_header';
+      function saveHeader(){
+        const payload = {
+          date: date?.value || '',
+          customer: cust?.value || '',
+          currency: curr?.value || '',
+          payment_term: pterm?.value || '',
+          transport_mode: mode?.value || '',
+          service_option: svc?.value || '',
+          notes: (document.getElementById('id_notes')||{}).value || ''
+        };
+        sessionStorage.setItem(storageKey, JSON.stringify(payload));
+      }
+      function restoreHeader(){
+        const st = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
+        if (!st || typeof st !== 'object') return;
+
+        if (date && !date.value && st.date) date.value = st.date;
+        if (cust && !cust.value && st.customer){
+          if (![...cust.options].some(o=>o.value===st.customer)){
+            cust.add(new Option(st.customer, st.customer));
+          }
+          cust.value = st.customer;
+        }
+        if (curr && !curr.value && st.currency){
+          if (![...curr.options].some(o=>o.value===st.currency)){
+            curr.add(new Option(st.currency, st.currency));
+          }
+          curr.value = st.currency;
+        }
+        if (pterm && !pterm.value && st.payment_term){
+          if (![...pterm.options].some(o=>o.value===st.payment_term)){
+            pterm.add(new Option(st.payment_term, st.payment_term));
+          }
+          pterm.value = st.payment_term;
+        }
+        if (mode && !mode.value && st.transport_mode){
+          if (![...mode.options].some(o=>o.value===st.transport_mode)){
+            mode.add(new Option(st.transport_mode, st.transport_mode));
+          }
+          mode.value = st.transport_mode;
+        }
+        // notes
+        const notes = document.getElementById('id_notes');
+        if (notes && !notes.value && st.notes) notes.value = st.notes;
+      }
+
+      // Restore dulu, baru loadSvc agar svc bisa di-set sesuai storage
+      restoreHeader();
+      loadSvc();
+
+      // Simpan setiap perubahan signifikan
+      [date,cust,curr,pterm,mode,svc,document.getElementById('id_notes')].forEach(el=>{
+        if(!el) return;
+        el.addEventListener('change', saveHeader);
+        el.addEventListener('input',  saveHeader);
+      });
+
+      // Pastikan tersimpan saat submit
+      form?.addEventListener('submit', saveHeader);
+    })();
+    </script>
+
+  {# ====================== STEP 2: CARGO ====================== #}
+  {% elif step == "lines" %}
+    <form id="lines-form" method="post" novalidate>
+      {% csrf_token %}
+      {{ cargo_fs.management_form }}
+
+      <div class="row g-3">
+        {# ------- KIRI: Cargo Detail ------- #}
+        <div class="col-lg-5">
+          <div class="card shadow-sm h-100">
+            <div class="card-header">Cargo Detail</div>
+            <div class="card-body" id="add-form">
+              <div class="row g-2">
+                <div class="col-6">
+                  <label class="form-label">Origin</label>
+                  {{ cargo_fs.empty_form.origin }}
+                </div>
+                <div class="col-6">
+                  <label class="form-label">Destination</label>
+                  {{ cargo_fs.empty_form.destination }}
+                </div>
+                <div class="col-12">
+                  <label class="form-label">Description</label>
+                  {{ cargo_fs.empty_form.description }}
+                </div>
+                <div class="col-4">
+                  <label class="form-label">Qty</label>
+                  {{ cargo_fs.empty_form.qty }}
+                </div>
+                <div class="col-4">
+                  <label class="form-label">Weight (kg)</label>
+                  {{ cargo_fs.empty_form.weight_kg }}
+                </div>
+                <div class="col-4">
+                  <label class="form-label">Volume (cbm)</label>
+                  {{ cargo_fs.empty_form.volume_cbm }}
+                </div>
+                <div class="col-6">
+                  <label class="form-label">Price</label>
+                  {{ cargo_fs.empty_form.price }}
+                </div>
+                <div class="col-6">
+                  <label class="form-label">Amount</label>
+                  {{ cargo_fs.empty_form.amount }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {# ------- KANAN: Box kanan awalnya kosong; tabel muncul setelah Add ------- #}
+        <div class="col-lg-7">
+          <div class="card shadow-sm h-100">
+            <div class="card-header">Daftar Cargo</div>
+            <div class="card-body p-0">
+              <div id="empty-hint" class="p-3 text-center text-muted">Belum ada cargo.</div>
+              <div id="cargo-table-wrap" class="table-responsive d-none">
+                <table class="table table-sm table-striped align-middle mb-0">
+                  <thead class="table-light">
+                    <tr>
+                      <th style="width:48px;">#</th>
+                      <th>Desc</th>
+                      <th>Origin</th>
+                      <th>Destination</th>
+                      <th class="text-end" style="width:90px;">Qty</th>
+                      <th class="text-end" style="width:110px;">Weight</th>
+                      <th class="text-end" style="width:110px;">Volume</th>
+                      <th class="text-end" style="width:110px;">Price</th>
+                      <th class="text-end" style="width:120px;">Amount</th>
+                      <th style="width:96px;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="cargo-rows"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {# --- Template baris baru; input asli disimpan tersembunyi agar ikut POST --- #}
+      <template id="cargo-row-template">
+        <tr class="cargo-row">
+          <td class="row-no"></td>
+          <td>
+            <div class="d-none">
+              {{ cargo_fs.empty_form.description }}
+              {{ cargo_fs.empty_form.qty }}
+              {{ cargo_fs.empty_form.weight_kg }}
+              {{ cargo_fs.empty_form.volume_cbm }}
+              {{ cargo_fs.empty_form.price }}
+              {{ cargo_fs.empty_form.amount }}
+              {{ cargo_fs.empty_form.origin }}
+              {{ cargo_fs.empty_form.destination }}
+            </div>
+            <span class="cell-desc"></span>
+          </td>
+          <td class="cell-origin"></td>
+          <td class="cell-destination"></td>
+          <td class="text-end cell-qty"></td>
+          <td class="text-end cell-weight"></td>
+          <td class="text-end cell-volume"></td>
+          <td class="text-end cell-price"></td>
+          <td class="text-end cell-amount"></td>
+          <td>
+            <button type="button" class="btn btn-outline-danger btn-sm rounded-0 btn-remove">Remove</button>
+          </td>
+        </tr>
+      </template>
+
+      {# ======= Global toolbar: Back kiri, Add + Finish kanan ======= #}
+      <div class="mt-3 d-flex justify-content-between toolbar-sticky px-2 py-2 rounded-bottom">
+        <a href="?step=header" class="btn btn-outline-secondary rounded-0">← Back</a>
+        <div class="d-flex gap-2">
+          <button type="button" id="btn-add-cargo" class="btn btn-primary rounded-0">+ Add Cargo</button>
+          <button id="btn-finish" class="btn btn-success rounded-0 d-none" type="submit" name="finish" value="1">
+            Finish / Save
+          </button>
+        </div>
+      </div>
+    </form>
+
+    <script>
+    (function(){
+      // ---- helpers
+      async function j(url){
+        const r = await fetch(url, {credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        return r.json();
+      }
+      function calcAmount(q, p){
+        const qq = parseFloat(q||'0'), pp = parseFloat(p||'0');
+        return (!isNaN(qq) && !isNaN(pp)) ? (qq*pp).toFixed(2) : '';
+      }
+      function setHidden(root, suffix, val){
+        const el = root.querySelector(`[name$="${suffix}"]`);
+        if (el) el.value = val ?? '';
+      }
+
+      // ---- endpoints
+      const URL_STATE = "{% url 'sales:freight_wizard_state' %}";
+      const URL_LOC   = "{% url 'sales:freight_location_options' %}";
+
+      // ---- DOM refs
+      const form      = document.getElementById('lines-form');
+      const addForm   = document.getElementById('add-form');
+      const addBtn    = document.getElementById('btn-add-cargo');
+      const finishBtn = document.getElementById('btn-finish');
+      const rowsWrap  = document.getElementById('cargo-rows');
+      const tableWrap = document.getElementById('cargo-table-wrap');
+      const emptyHint = document.getElementById('empty-hint');
+      const tmpl      = document.getElementById('cargo-row-template');
+      const totalInp  = document.getElementById('id_cargo-TOTAL_FORMS');
+      if (!addForm || !addBtn || !rowsWrap || !tmpl || !totalInp) return;
+
+      // fields kiri
+      const fOrigin = addForm.querySelector('select[name$="-origin"]');
+      const fDest   = addForm.querySelector('select[name$="-destination"]');
+      const fDesc   = addForm.querySelector('[name$="-description"]');
+      const fQty    = addForm.querySelector('[name$="-qty"]');
+      const fW      = addForm.querySelector('[name$="-weight_kg"]');
+      const fV      = addForm.querySelector('[name$="-volume_cbm"]');
+      const fP      = addForm.querySelector('[name$="-price"]');
+      const fA      = addForm.querySelector('[name$="-amount"]');
+
+      // konsistensi placeholder untuk OD (nilai awal harus kosong)
+      function fillSelect(sel, names, placeholderText){
+        if(!sel) return;
+        sel.innerHTML = '';
+        sel.add(new Option(placeholderText || '-- pilih --', ''));
+        (names||[]).forEach(n => sel.add(new Option(String(n), String(n))));
+        sel.value = ''; // wajib pilih manual
+      }
+
+      async function hydrateOD(){
+        try{
+          const st = await j(URL_STATE); // {mode, service}
+          const m = st.mode || '', s = st.service || '';
+          const o = await j(URL_LOC + "?role=origin&mode="+encodeURIComponent(m)+"&service="+encodeURIComponent(s));
+          const d = await j(URL_LOC + "?role=destination&mode="+encodeURIComponent(m)+"&service="+encodeURIComponent(s));
+          fillSelect(fOrigin, o.items || [], "Select origin");
+          fillSelect(fDest,   d.items || [], "Select destination");
+        }catch(e){
+          if (fOrigin && !fOrigin.options.length) fillSelect(fOrigin, [], "Select origin");
+          if (fDest   && !fDest.options.length)   fillSelect(fDest,   [], "Select destination");
+        }
+      }
+
+      function revealRightBox(){
+        emptyHint.classList.add('d-none');
+        tableWrap.classList.remove('d-none');
+        finishBtn.classList.remove('d-none'); // tampilkan tombol finish/save
+      }
+      function getPrefix(){
+        const m = (totalInp.id || '').match(/^id_(.+)-TOTAL_FORMS$/);
+        return m ? m[1] : 'cargo';
+      }
+      function reindexRows(){
+        const prefix = getPrefix();
+        const rows = Array.from(rowsWrap.querySelectorAll('tr.cargo-row'));
+        rows.forEach((row, i) => {
+          const no = row.querySelector('.row-no');
+          if (no) no.textContent = String(i+1);
+          row.querySelectorAll('.d-none [name]').forEach(el => {
+            const oldName = el.getAttribute('name');
+            const newName = oldName.replace(new RegExp(`^${prefix}-\\d+-`), `${prefix}-${i}-`);
+            if (newName !== oldName) el.setAttribute('name', newName);
+          });
+          row.querySelectorAll('.d-none [id]').forEach(el => {
+            const oldId = el.getAttribute('id');
+            const newId = oldId.replace(new RegExp(`^id_${prefix}-\\d+-`), `id_${prefix}-${i}-`);
+            if (newId !== oldId) el.setAttribute('id', newId);
+          });
+        });
+        totalInp.value = String(rows.length);
+        if (rows.length === 0){
+          tableWrap.classList.add('d-none');
+          finishBtn.classList.add('d-none');
+          emptyHint.classList.remove('d-none');
+        }
+      }
+
+      function addRow(){
+        if (!fOrigin.value || !fDest.value || !fDesc.value){
+          alert('Origin, Destination, dan Description wajib diisi.');
+          return;
+        }
+        const idx = parseInt(totalInp.value || '0', 10);
+        const html = tmpl.innerHTML.replaceAll('__prefix__', String(idx));
+        const holder = document.createElement('tbody');
+        holder.innerHTML = html.trim();
+        const row = holder.firstElementChild;
+
+        const root = row.querySelector('.d-none');
+        const amountVal = fA.value || calcAmount(fQty.value, fP.value);
+        setHidden(root, '-origin',       fOrigin.value);
+        setHidden(root, '-destination',  fDest.value);
+        setHidden(root, '-description',  fDesc.value);
+        setHidden(root, '-qty',          fQty.value);
+        setHidden(root, '-weight_kg',    fW.value);
+        setHidden(root, '-volume_cbm',   fV.value);
+        setHidden(root, '-price',        fP.value);
+        setHidden(root, '-amount',       amountVal);
+
+        row.querySelector('.cell-desc').textContent        = fDesc.value || '';
+        row.querySelector('.cell-origin').textContent      = fOrigin.value || '';
+        row.querySelector('.cell-destination').textContent = fDest.value || '';
+        row.querySelector('.cell-qty').textContent         = fQty.value || '0';
+        row.querySelector('.cell-weight').textContent      = fW.value || '0';
+        row.querySelector('.cell-volume').textContent      = fV.value || '0';
+        row.querySelector('.cell-price').textContent       = fP.value || '0';
+        row.querySelector('.cell-amount').textContent      = amountVal || '0';
+
+        rowsWrap.appendChild(row);
+        revealRightBox();
+        reindexRows();
+      }
+
+      // remove baris (delegasi)
+      rowsWrap.addEventListener('click', function(ev){
+        const btn = ev.target.closest('.btn-remove');
+        if (!btn) return;
+        const tr = btn.closest('tr.cargo-row');
+        if (!tr) return;
+        tr.remove();
+        reindexRows();
+      });
+
+      // init
+      hydrateOD();                 // OD punya opsi, nilai awal kosong ""
+      addBtn.addEventListener('click', addRow);
+
+      // --- jaga-jaga: set placeholder jika widget select default tidak ada placeholder
+      function ensurePH(sel, text){
+        if(!sel) return;
+        const first = sel.options[0];
+        if (!first || first.value !== "") {
+          sel.insertBefore(new Option(text, ""), sel.firstChild);
+        } else {
+          first.textContent = text;
+        }
+        if (!sel.value) sel.value = "";
+      }
+      ensurePH(fOrigin, "Select origin");
+      ensurePH(fDest,   "Select destination");
+
+      // Konsistensi tampilan input/select
+      document.querySelectorAll('.wizard select').forEach(s=> s.classList.add('form-select'));
+      document.querySelectorAll('.wizard input').forEach(i=> i.classList.add('form-control'));
+    })();
+    </script>
+  {% endif %}
+</div>
+{% endblock %}
