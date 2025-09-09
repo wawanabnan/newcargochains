@@ -48,6 +48,8 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'core.context_processors.company',
+                'sales.context_processors.quotation_settings',
+
                 
             ],
         },
@@ -93,3 +95,5 @@ LOGOUT_REDIRECT_URL = "account:login"
 
 USE_L10N = True       # aktifkan localization
 LANGUAGE_CODE = 'id'
+
+QUO_VALID_DAYS = 7

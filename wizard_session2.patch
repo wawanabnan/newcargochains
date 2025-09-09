@@ -1,0 +1,348 @@
+diff --git a/sales/views.py b/sales/views.py
+index 1111111..2222222 100644
+--- a/sales/views.py
++++ b/sales/views.py
+@@ -1,6 +1,18 @@
+-from django.utils import timezone
++from django.utils import timezone
++from datetime import datetime, timedelta
++from django.conf import settings
++from django.http import JsonResponse
++from django.contrib import messages
++
++# --- helpers ---
++def _get_int_setting(name: str, default: int) -> int:
++    """
++    Ambil setting integer dari:
++      1) model Setting (opsional), field key/value
++      2) django.conf.settings
++    fallback ke default.
++    """
++    try:
++        from core.models import Setting  # SESUAIKAN jika model Setting beda lokasi
++        val = Setting.objects.filter(key=name).values_list("value", flat=True).first()
++        if val is not None:
++            try:
++                return int(val)
++            except ValueError:
++                pass
++    except Exception:
++        pass
++    return int(getattr(settings, name, default))
++
++def _format_ddmmyy(d: datetime.date) -> str:
++    return d.strftime("%d-%m-%y")
++
++def _parse_ddmmyy(s: str):
++    """
++    Terima "dd-mm-yy" (prioritas), fallback "YYYY-MM-DD".
++    Return: date or None.
++    """
++    s = (s or "").strip()
++    for fmt in ("%d-%m-%y", "%Y-%m-%d"):
++        try:
++            return datetime.strptime(s, fmt).date()
++        except ValueError:
++            continue
++    return None
+@@
+ class FreightQuotationWizardHeaderView(View):
+     template_name = "sales/wizard/header.html"
+ 
+     def get(self, request, *args, **kwargs):
+-        initial = {}
++        initial = {}
+         mode_code = _default_mode_code()  # contoh "SEA"
+         initial["transport_mode"] = mode_code
+ 
+         svc_choices = _service_choices_for_mode(mode_code)
+         preferred = {"TRUCKING", "P2P"}
+         current_svc = next((c for c,_ in svc_choices if c in preferred), (svc_choices[0][0] if svc_choices else ""))
+         initial["service_option"] = current_svc
++
++        # Default valid_until: today + QUO_VALID_DAYS, tampil dd-mm-yy
++        days = _get_int_setting("QUO_VALID_DAYS", 7)
++        today = timezone.now().date()
++        valid_until = today + timedelta(days=days)
++        initial["valid_until"] = _format_ddmmyy(valid_until)
+ 
+         form = FreightHeaderForm(initial=initial)
+         context = {
+             "form": form,
+             "svc_choices": svc_choices,
+         }
+         return render(request, self.template_name, context)
+ 
+     def post(self, request, *args, **kwargs):
+-        form = FreightHeaderForm(request.POST)
++        # Normalisasi valid_until dari dd-mm-yy ke ISO untuk ModelForm
++        post_data = request.POST.copy()
++        parsed = _parse_ddmmyy(post_data.get("valid_until"))
++        if parsed:
++            post_data["valid_until"] = parsed.isoformat()
++        form = FreightHeaderForm(post_data)
+         if form.is_valid():
+             quotation = form.save(commit=False)
+-            if not quotation.date:
+-                quotation.date = timezone.now().date()
++            if not quotation.date:
++                quotation.date = timezone.now().date()
++            if not quotation.valid_until:
++                days = _get_int_setting("QUO_VALID_DAYS", 7)
++                quotation.valid_until = timezone.now().date() + timedelta(days=days)
+             quotation.created_by = request.user
+             quotation.save()
+             return redirect("sales:quotation_wizard_lines", pk=quotation.pk)
+@@
+ class FreightQuotationWizardLinesView(View):
+     template_name = "sales/wizard/lines.html"
+ 
+     def get(self, request, pk, *args, **kwargs):
+         quotation = get_object_or_404(FreightQuotation, pk=pk)
+         formset = FreightCargoFormSet(instance=quotation)
+         return render(request, self.template_name, {"quotation": quotation, "formset": formset})
+ 
+     def post(self, request, pk, *args, **kwargs):
+         quotation = get_object_or_404(FreightQuotation, pk=pk)
+-        formset = FreightCargoFormSet(request.POST, instance=quotation)
+-        if formset.is_valid():
+-            formset.save()
+-            if "finish" in request.POST:
+-                # TODO: set status/validasi final bila diperlukan
+-                return redirect("sales:quotation_detail", pk=quotation.pk)
+-            return redirect("sales:quotation_wizard_lines", pk=quotation.pk)
+-        return render(request, self.template_name, {"quotation": quotation, "formset": formset})
++        formset = FreightCargoFormSet(request.POST, instance=quotation)
++        if formset.is_valid():
++            formset.save()
++            if "finish" in request.POST:
++                # Validasi minimal sebelum finish
++                if not quotation.cargos.exists():
++                    messages.error(request, "Minimal 1 cargo line diperlukan sebelum Finish.")
++                    return redirect("sales:quotation_wizard_lines", pk=quotation.pk)
++                # Optional: set status awal
++                if hasattr(quotation, "status") and not quotation.status:
++                    quotation.status = "DRAFT"
++                    quotation.save(update_fields=["status"])
++                return redirect("sales:quotation_detail", pk=quotation.pk)
++            return redirect("sales:quotation_wizard_lines", pk=quotation.pk)
++        return render(request, self.template_name, {"quotation": quotation, "formset": formset})
++
++    # (opsional) endpoint probe default date
++    def dispatch(self, request, *args, **kwargs):
++        if request.method == "GET" and request.GET.get("probe_default_valid_until") == "1":
++            days = _get_int_setting("QUO_VALID_DAYS", 7)
++            d = timezone.now().date() + timedelta(days=days)
++            return JsonResponse({"valid_until": _format_ddmmyy(d)})
++        return super().dispatch(request, *args, **kwargs)
+diff --git a/sales/forms.py b/sales/forms.py
+index 3333333..4444444 100644
+--- a/sales/forms.py
++++ b/sales/forms.py
+@@ -1,8 +1,28 @@
+ from django import forms
+ from .models import FreightQuotation, FreightCargo
++from datetime import datetime
+ 
+ class FreightHeaderForm(forms.ModelForm):
+     class Meta:
+         model = FreightQuotation
+         fields = ["business_type", "transport_mode", "service_option", "date", "valid_until", "currency", "payment_term", "notes"]
+         widgets = {
+             "date": forms.DateInput(attrs={"class": "form-control", "autocomplete": "off"}),
+-            "valid_until": forms.DateInput(attrs={"class": "form-control", "autocomplete": "off"}),
++            # pakai text agar bebas format dd-mm-yy di flatpickr
++            "valid_until": forms.TextInput(attrs={"class": "form-control", "autocomplete": "off", "placeholder": "dd-mm-yy"}),
+             "notes": forms.Textarea(attrs={"rows": 4, "class": "form-control"}),
+         }
++
++    def clean_valid_until(self):
++        """
++        Terima dd-mm-yy dari UI → kembalikan python date.
++        Guard kedua jika ada jalur selain view.
++        """
++        v = self.cleaned_data.get("valid_until")
++        if isinstance(v, str):
++            s = v.strip()
++            for fmt in ("%d-%m-%y", "%Y-%m-%d"):
++                try:
++                    return datetime.strptime(s, fmt).date()
++                except ValueError:
++                    continue
++            raise forms.ValidationError("Format tanggal tidak valid. Gunakan dd-mm-yy.")
++        return v
+diff --git a/sales/templates/sales/wizard/header.html b/sales/templates/sales/wizard/header.html
+index 5555555..6666666 100644
+--- a/sales/templates/sales/wizard/header.html
++++ b/sales/templates/sales/wizard/header.html
+@@ -1,20 +1,36 @@
+ {% load static %}
+ <form method="post" novalidate>
+   {% csrf_token %}
+   <div class="row">
+     <div class="col-md-4">
+       <label class="form-label">Valid Until</label>
+-      {{ form.valid_until }}
++      <input
++        type="text"
++        name="valid_until"
++        id="id_valid_until"
++        class="form-control"
++        value="{{ form.initial.valid_until|default:form.instance.valid_until|date:'d-m-y' }}"
++        placeholder="dd-mm-yy"
++        autocomplete="off"
++      />
+       <small class="text-muted">format: dd-mm-yy</small>
+     </div>
+     <div class="col-md-8">
+       <label class="form-label">Notes</label>
+       {{ form.notes }}
+     </div>
+   </div>
+   <div class="mt-3 d-flex gap-2">
+     <button type="submit" class="btn btn-primary">Next</button>
+   </div>
+ </form>
+ 
+-<script src="{% static 'vendor/flatpickr/flatpickr.min.js' %}"></script>
+-<link rel="stylesheet" href="{% static 'vendor/flatpickr/flatpickr.min.css' %}">
+-<script src="{% static 'vendor/tinymce/tinymce.min.js' %}"></script>
+-<script src="{% static 'sales/js/wizard_header.js' %}"></script>
++<link rel="stylesheet" href="{% static 'vendor/flatpickr/flatpickr.min.css' %}">
++<script src="{% static 'vendor/flatpickr/flatpickr.min.js' %}"></script>
++<script src="{% static 'vendor/tinymce/tinymce.min.js' %}"></script>
++<script>
++  window.__QUO_VALID_DAYS__ = {{ QUO_VALID_DAYS|default:7 }};
++</script>
++<script src="{% static 'sales/js/wizard_header.js' %}"></script>
+diff --git a/sales/templates/sales/wizard/lines.html b/sales/templates/sales/wizard/lines.html
+index 7777777..8888888 100644
+--- a/sales/templates/sales/wizard/lines.html
++++ b/sales/templates/sales/wizard/lines.html
+@@ -1,30 +1,33 @@
+ <form method="post">
+   {% csrf_token %}
+   {{ formset.management_form }}
+   <div class="table-responsive">
+     <table class="table table-sm align-middle">
+       <thead>
+         <tr>
+           <th>Description</th>
+           <th>HS Code</th>
+           <th>GW</th>
+           <th>NW</th>
+           <th>Vol</th>
+         </tr>
+       </thead>
+       <tbody>
+         {% for form in formset.forms %}
+           <tr>
+             <td>{{ form.description }}</td>
+             <td>{{ form.hs_code }}</td>
+             <td>{{ form.gross_weight }}</td>
+             <td>{{ form.net_weight }}</td>
+             <td>{{ form.volume }}</td>
+           </tr>
+         {% endfor %}
+       </tbody>
+     </table>
+   </div>
+   <div class="d-flex gap-2">
+     <button name="save" value="1" class="btn btn-secondary" type="submit">Save</button>
+     <button name="finish" value="1" class="btn btn-primary" type="submit">Finish</button>
+   </div>
+ </form>
+diff --git a/sales/static/sales/js/wizard_header.js b/sales/static/sales/js/wizard_header.js
+index 9999999..aaaaaaa 100644
+--- a/sales/static/sales/js/wizard_header.js
++++ b/sales/static/sales/js/wizard_header.js
+@@ -1,4 +1,48 @@
+-(function(){
+-  // init flatpickr & tinymce
+-})();
++(function () {
++  // --- Flatpickr (format dd-mm-yy)
++  var el = document.getElementById("id_valid_until");
++  if (el && window.flatpickr) {
++    // Jika input sudah berisi YYYY-MM-DD (mis. dari server), convert ke dd-mm-yy
++    var v = el.value && el.value.trim();
++    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
++      var parts = v.split("-");
++      el.value = parts[2].slice(-2) + "-" + parts[1] + "-" + parts[0].slice(-2);
++    }
++    window.flatpickr(el, {
++      dateFormat: "d-m-y",
++      allowInput: true,
++      defaultDate: (function () {
++        if (el.value && el.value.trim() !== "") return el.value;
++        var add = parseInt(window.__QUO_VALID_DAYS__ || 7, 10);
++        var d = new Date();
++        d.setDate(d.getDate() + add);
++        var dd = String(d.getDate()).padStart(2, "0");
++        var mm = String(d.getMonth() + 1).padStart(2, "0");
++        var yy = String(d.getFullYear()).slice(-2);
++        var val = dd + "-" + mm + "-" + yy;
++        el.value = val;
++        return val;
++      })()
++    });
++  }
++
++  // --- TinyMCE height fix (gunakan height, bukan hanya autoresize)
++  if (window.tinymce) {
++    tinymce.init({
++      selector: 'textarea[name="notes"]',
++      menubar: false,
++      statusbar: true,
++      plugins: 'lists link table autoresize',
++      toolbar:
++        'undo redo | bold italic underline | bullist numlist | link table | removeformat',
++      height: 460,
++      autoresize_min_height: 460,
++      branding: false,
++      content_style:
++        "body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; font-size: 14px; }"
++    });
++  }
++})();
+diff --git a/sales/context_processors.py b/sales/context_processors.py
+new file mode 100644
+index 0000000..bbbbbbb
+--- /dev/null
++++ b/sales/context_processors.py
+@@ -0,0 +1,20 @@
++from django.conf import settings
++
++def quotation_settings(request):
++    """
++    Inject QUO_VALID_DAYS agar bisa dipakai di template (window.__QUO_VALID_DAYS__)
++    """
++    val = getattr(settings, "QUO_VALID_DAYS", 7)
++    try:
++        from core.models import Setting
++        s = Setting.objects.filter(key="QUO_VALID_DAYS").values_list("value", flat=True).first()
++        if s is not None:
++            val = int(s)
++    except Exception:
++        pass
++    return {"QUO_VALID_DAYS": val}
+diff --git a/project/settings.py b/project/settings.py
+index cccccc1..ddddddd 100644
+--- a/project/settings.py
++++ b/project/settings.py
+@@ -120,6 +120,7 @@ TEMPLATES = [
+                 "django.template.context_processors.request",
+                 "django.contrib.auth.context_processors.auth",
+                 "django.contrib.messages.context_processors.messages",
++                "sales.context_processors.quotation_settings",
+             ],
+         },
+     },
+@@ -200,3 +201,6 @@ STATIC_URL = "static/"
+ STATICFILES_DIRS = [BASE_DIR / "static"]
+ 
+ MEDIA_URL = "media/"
+ MEDIA_ROOT = BASE_DIR / "media"
++
++# Default fallback jika tidak ada di DB Setting
++QUO_VALID_DAYS = 7

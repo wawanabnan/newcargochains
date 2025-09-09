@@ -53,6 +53,7 @@
               <option value="">-- no service available --</option>
             {% endfor %}
           </select>
+          <small id="svc_hint" class="text-muted" style="display:none">Loading options…</small>
         </div>
 
         <div class="col-12">
@@ -63,58 +64,61 @@
     </div>
 
     <div class="card-footer d-flex gap-2">
-      <button type="submit" class="btn btn-primary">Next</button>
+      <button type="submit" id="btnNext" class="btn btn-primary">Next</button>
       <a href="{% url 'sales:freight_wizard_reset' %}" class="btn btn-outline-danger ms-auto">Reset Wizard</a>
     </div>
   </form>
 </div>
 
-{# TinyMCE (pakai CDN API key kamu) — jika mau tetap rich text #}
+{# TinyMCE pakai API key kamu (hapus jika self-host) #}
 <script src="https://cdn.tiny.cloud/1/klpop8ud5zsip7zloht3kglaf0it7sau7hlm7yfscb3cjxsq/tinymce/7/tinymce.min.js" referrerpolicy="origin"></script>
 <script>
-document.addEventListener('DOMContentLoaded', function(){
-  // --- TinyMCE: pakai height supaya benar-benar tinggi
-  if (window.tinymce) {
-    tinymce.init({
-      selector: '#id_notes',
-      menubar: false,
-      plugins: 'lists link autoresize',
-      toolbar: 'undo redo | bold italic underline | bullist numlist | link | removeformat',
-      branding: false,
-      statusbar: true,
-      height: 460,               // <- kunci tinggi editor
-      autoresize_min_height: 460,
-      content_style: 'body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;}'
-    });
-  }
+tinymce.init({
+  selector: '#id_notes',
+  menubar: false,
+  plugins: 'lists link autoresize',
+  toolbar: 'undo redo | bold italic underline | bullist numlist | link | removeformat',
+  branding: false,
+  statusbar: false,
+  autoresize_bottom_margin: 0,
+  autoresize_overflow_padding: 0,
+  autoresize_min_height: 200,
+  autoresize_max_height: 0,
+  content_style: 'body{overflow:hidden;}'
+});
 </script>
 
-{# Fokus & buka datepicker (jika didukung browser) #}
 <script>
 (function(){
+  // --- Fokus & upaya buka datepicker (sebisa browser) ---
   const dt = document.getElementById('id_valid_until');
-  if (!dt) return;
-  try {
-    dt.focus({preventScroll:true});
-    if (typeof dt.showPicker === 'function') dt.showPicker();
-  } catch(e) {}
-})();
-</script>
-<script>
-(function(){
+  if (dt) {
+    try {
+      dt.focus({preventScroll:true});
+      if (typeof dt.showPicker === 'function') dt.showPicker();
+      else dt.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
+    } catch(e) {}
+  }
+
+  // --- Mode change -> reload Service Options via AJAX ---
   const modeSel = document.getElementById('id_transport_mode');
   const svcSel  = document.getElementById('id_service_option');
-  const btnNext = document.querySelector('#wizard-form button[type="submit"]');
+  const btnNext = document.getElementById('btnNext');
+  const hint    = document.getElementById('svc_hint');
   let ctrl;
 
   async function reloadServices() {
-    if (!modeSel || !svcSel) return;
-    const raw = modeSel.value; // pk atau code
-    btnNext && (btnNext.disabled = true);
+    const raw = modeSel ? modeSel.value : '';
+    // jika transport_mode adalah <select> FK, valuenya PK -> coba baca attribute data-code jika ada
+    const modeCode = raw; // diasumsikan berisi kode ("SEA"). Kalau PK, sesuaikan server agar option value=kode.
+    if (!svcSel || !modeCode) return;
+
+    btnNext.disabled = true;
+    hint.style.display = 'inline';
     try {
       if (ctrl) ctrl.abort();
       ctrl = new AbortController();
-      const url = "{% url 'sales:freight_service_options' %}?mode=" + encodeURIComponent(raw) + "&t=" + Date.now();
+      const url = "{% url 'sales:freight_service_options' %}?mode=" + encodeURIComponent(modeCode) + "&t=" + Date.now();
       const r = await fetch(url, {cache:'no-store', signal: ctrl.signal});
       const d = await r.json();
       svcSel.innerHTML = '';
@@ -124,52 +128,19 @@ document.addEventListener('DOMContentLoaded', function(){
         svcSel.appendChild(o);
       });
       if (svcSel.options.length) {
+        // pilih P2P bila ada
         const p2p = Array.from(svcSel.options).find(o=>o.value==="P2P");
         svcSel.value = p2p ? "P2P" : svcSel.options[0].value;
       }
     } catch(e) {
       console.error(e);
     } finally {
-      btnNext && (btnNext.disabled = !svcSel.value);
+      hint.style.display = 'none';
+      btnNext.disabled = !svcSel.value;
     }
   }
 
   if (modeSel) modeSel.addEventListener('change', reloadServices);
 })();
 </script>
-<!-- Flatpickr CDN -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  const el = document.getElementById('id_valid_until');
-  if (!el || !window.flatpickr) return;
-
-  // Jika nilai dari server berupa YYYY-MM-DD (date object dirender Django),
-  // konversi sekali ke dd-mm-yy supaya match dengan dateFormat.
-  var v = (el.value || '').trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
-    var p = v.split('-');
-    el.value = p[2].slice(-2) + '-' + p[1] + '-' + p[0].slice(-2);
-  }
-
-  // Jika kosong (mis. initial gagal), isi fallback today + 7 (atau ambil dari QUO_VALID_DAYS jika kamu inject)
-  if (!el.value) {
-    var add = (window.__QUO_VALID_DAYS__ || 7) | 0;
-    var d = new Date(); d.setDate(d.getDate() + add);
-    var dd = String(d.getDate()).padStart(2,'0');
-    var mm = String(d.getMonth()+1).padStart(2,'0');
-    var yy = String(d.getFullYear()).slice(-2);
-    el.value = dd + '-' + mm + '-' + yy;
-  }
-
-  flatpickr(el, { dateFormat: "d-m-y", defaultDate: el.value || undefined });
-
-});
-</script>
-
-
-
-
 {% endblock %}

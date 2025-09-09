@@ -1,11 +1,7 @@
 # sales/views.py
-from django.utils import timezone
+from __future__ import annotations
 import datetime, re
 from datetime import timedelta
-from django.utils.dateparse import parse_date
-from partners.models import Partner as CustomerModel
-import json
-
 
 from django.apps import apps
 from django.contrib import messages
@@ -14,34 +10,12 @@ from django.db.models import Max
 from django.http import JsonResponse, HttpRequest, HttpResponse
 from django.shortcuts import render, redirect
 from django.urls import reverse
-from django.db.models import Q, Prefetch
 
 from .forms import FreightHeaderForm, CargoFormSet
-
 from .models import (
-    FreightQuotation, FreightCargo, FreightCharge,
-    FreightOrder, FreightOrderLine,   # ← tambahkan ini
+    FreightQuotation, FreightCargo,
+    TransportMode, ModeService, LocationRule, Setting
 )
-from django.shortcuts import render, redirect, get_object_or_404
-from django.template.loader import render_to_string
-from utils.pdf import render_pdf_from_html
-
-# ==== Mapping service berdasarkan mode transport ====
-SERVICE_BY_MODE = {
-    "SEA": [
-        ("DOOR_TO_DOOR", "Door to door"),
-        ("DOOR_TO_PORT", "Door to port"),
-        ("PORT_TO_PORT", "Port to port"),
-    ],
-    "AIR": [
-        ("DOOR_TO_AIRPORT", "Door to airport"),
-        ("AIRPORT_TO_AIRPORT", "Airport to airport"),
-    ],
-    "LAND": [
-        ("TRUCKING", "Trucking"),
-    ],
-}
-
 
 WZ_SESSION_KEY = "fq_wizard"
 
@@ -324,16 +298,6 @@ def freight_list(request):
         .order_by("-date", "-id"))
 
 
-    from pathlib import Path
-    import os
-
-    # ==== Customer proxy / fallback ====
-    try:
-        from partners.models import CustomerProxy as CustomerModel
-    except Exception:
-     from partners.models import Partner as CustomerModel
-
-
     # === dropdown data ===
     customer_options = []
     for c in get_customer_queryset():
@@ -377,227 +341,3 @@ def freight_list(request):
     }
     return render(request, "sales/freight/list.html", ctx)
 
-def get_customer_queryset():
-    qs = CustomerModel.objects.all()
-    if hasattr(CustomerModel, "is_customer"):
-        try:
-            qs = qs.filter(is_customer=True)
-        except Exception:
-            pass
-    return qs.order_by("name", "id")
-
-
-
-def freight_edit(request, pk):
-    q = get_object_or_404(FreightQuotation, pk=pk)
-    if request.method == "POST":
-        form = FreightHeaderForm(request.POST, instance=q)
-        if form.is_valid():
-            cd = form.cleaned_data
-            q.date = cd["date"]
-            q.customer = cd["customer"]
-            q.currency = cd.get("currency") or q.currency
-            q.payment_term = cd.get("payment_term") or ""
-            q.transport_mode = cd["transport_mode"]
-            q.service_option = cd["service_option"]
-            q.notes = cd.get("notes") or ""
-            q.save()
-            messages.success(request, "Quotation updated.")
-            return redirect("sales:freight_view", pk=q.pk)
-    else:
-        form = FreightHeaderForm(instance=q)
-
-    return render(request, "sales/freight/edit.html", {"form": form, "q": q})
-
-
-def freight_view(request, pk: int):
-    q = get_object_or_404(
-        FreightQuotation.objects.select_related("customer").prefetch_related(
-            Prefetch("cargos", queryset=FreightCargo.objects.all())
-        ),
-        pk=pk
-    )
-    cargo_rows, subtotal, vat, grand_total = _compute_totals(q)
-
-    ctx = {
-        "q": q,
-        "cargo_rows": cargo_rows,
-        "subtotal": subtotal,
-        "vat": vat,
-        "grand_total": grand_total,
-    }
-    return render(request, "sales/freight/view.html", ctx)
-
-
-def freight_bulk_action(request):
-    action = request.POST.get("action")
-    ids = request.POST.get("ids", "").strip()
-    id_list = [int(x) for x in ids.split(",") if x.isdigit()]
-
-    if not id_list:
-        messages.warning(request, "Tidak ada quotation yang dipilih.")
-        return redirect("sales:freight_list")
-
-    qs = FreightQuotation.objects.filter(id__in=id_list)
-
-    # --- aksi baru: set_status ---
-    if action == "set_status":
-        target = (request.POST.get("target_status") or "").upper()
-        # validasi: semua status awal harus sama
-        statuses = list(qs.values_list("status", flat=True).distinct())
-        if len(statuses) > 1:
-            messages.error(request, "Gagal: status awal tidak sama. Pilih item dengan status yang sama.")
-            return redirect("sales:freight_list")
-
-        try:
-            count = _bulk_change_status(qs, target)
-            messages.success(request, f"Berhasil ubah status {count} quotation ke {target}.")
-        except Exception as e:
-            messages.error(request, f"Gagal ubah status: {e}")
-        return redirect("sales:freight_list")
-
-    # --- aksi existing ---
-    if action == "email":
-        messages.success(request, f"Send Email: {qs.count()} quotation (dummy).")
-        return redirect("sales:freight_list")
-
-    if action == "manage_charges":
-        first_id = id_list[0]
-        return redirect("sales:freight_charges", pk=first_id)
-
-    if action == "delete":
-        count = qs.count()
-        FreightCharge.objects.filter(cargo__quotation_id__in=id_list).delete()
-        FreightCargo.objects.filter(quotation_id__in=id_list).delete()
-        qs.delete()
-        messages.success(request, f"Deleted {count} quotation(s).")
-        return redirect("sales:freight_list")
-
-    messages.error(request, "Aksi tidak dikenal.")
-    return redirect("sales:freight_list")
-
-
-def _compute_totals(quotation: FreightQuotation):
-    # hitung subtotal dari cargo.amount + charges(amount)
-    cargos = (FreightCargo.objects
-              .filter(quotation=quotation)
-              .prefetch_related(Prefetch("charges", queryset=FreightCharge.objects.all())))
-    subtotal = 0
-    cargo_rows = []
-    for c in cargos:
-        charge_total = sum(ch.amount or 0 for ch in c.charges.all())
-        line_total = (c.amount or 0) + charge_total
-        subtotal += line_total
-        cargo_rows.append({
-            "obj": c,
-            "charge_total": charge_total,
-            "line_total": line_total,
-            "charges": list(c.charges.all()),
-        })
-
-    vat = quotation.vat or 0
-    total = subtotal + vat
-    return cargo_rows, subtotal, vat, total
-
-
-def freight_send_email(request, pk: int):
-    # dummy email action
-    q = get_object_or_404(FreightQuotation, pk=pk)
-    if q.status == "DRAFT":
-        q.status = "SENT"
-        q.save(update_fields=["status"])
-    messages.success(request, f"Quotation {q.number} telah dikirim (dummy).")
-    return redirect("sales:freight_view", pk=pk)
-
-
-
-# =============================================================================
-# PDF: wkhtmltopdf (via pdfkit)
-# =============================================================================
-
-def freight_pdf(request, pk: int):
-    # ambil data + eager loading
-    q = get_object_or_404(
-        FreightQuotation.objects.select_related("customer").prefetch_related(
-            Prefetch("cargos", queryset=FreightCargo.objects.prefetch_related("charges"))
-        ),
-        pk=pk
-    )
-    # hitung totals + rows yang dipakai template
-    cargo_rows, subtotal, vat, grand_total = _compute_totals(q)
-
-    from django.contrib.staticfiles import finders
-    from pathlib import Path
-
-    abs_logo = finders.find("adminlte/img/cargochains.png")
-    logo_file_uri = Path(abs_logo).as_uri() if abs_logo else None
-
-    print("DEBUG LOGO FILE:", abs_logo)
-    print("DEBUG LOGO URI :", logo_file_uri)
-
-
-    ctx = {
-        "q": q,
-        "cargo_rows": cargo_rows,
-        "subtotal": subtotal,
-        "vat": vat,
-        "grand_total": grand_total,
-        "request": request,
-        "COMPANY_LOGO_STATIC":logo_file_uri
-    }
-
-    html = render_to_string("sales/freight/pdf.html", ctx, request=request)
-
-    pdf_bytes = render_pdf_from_html(html)
-
-    filename = (q.number or f"Quotation-{q.pk}").replace("/", "-") + ".pdf"
-    resp = HttpResponse(pdf_bytes, content_type="application/pdf")
-    resp["Content-Disposition"] = f'inline; filename="{filename}"'
-    return resp
-
-
-
-def freight_manage_charges(request, pk):
-    q = get_object_or_404(FreightQuotation, pk=pk)
-    cargos = q.cargos.all().order_by("id")
-    if not cargos.exists():
-        return redirect("sales:freight_view", pk=q.pk)
-
-    # pilih cargo aktif via ?cargo=
-    cid = request.GET.get("cargo")
-    try:
-        cargo_id = int(cid) if cid else cargos.first().id
-    except (TypeError, ValueError):
-        cargo_id = cargos.first().id
-
-    current = get_object_or_404(FreightCargo, pk=cargo_id, quotation=q)
-
-    ChargeFS = modelformset_factory(
-        FreightCharge, form=FreightChargeForm, extra=2, can_delete=True
-    )
-    queryset = FreightCharge.objects.filter(cargo=current).order_by("id")
-
-    if request.method == "POST":
-        formset = ChargeFS(request.POST, queryset=queryset, prefix="chg")
-        if formset.is_valid():
-            objs = formset.save(commit=False)
-            for obj in objs:
-                obj.cargo = current
-                if obj.qty and obj.rate and not obj.amount:
-                    try:
-                        obj.amount = obj.qty * obj.rate
-                    except Exception:
-                        pass
-                obj.save()
-            for obj in formset.deleted_objects:
-                obj.delete()
-            return redirect(f"{request.path}?cargo={current.id}")
-    else:
-        formset = ChargeFS(queryset=queryset, prefix="chg")
-
-    return render(request, "sales/freight/charges.html", {
-        "q": q,
-        "cargos": cargos,
-        "current": current,
-        "formset": formset,
-    })

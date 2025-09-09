@@ -115,8 +115,8 @@
             <td>
               <div class="fw-semibold">{{ row.obj.description|default:"(no description)" }}</div>
               <div class="small text-muted">
-                {% if row.obj.origin %}Origin: {{ row.obj.origin }}{% endif %}
-                {% if row.obj.destination %} &nbsp;•&nbsp; Destination: {{ row.obj.destination }}{% endif %}
+                {% if row.obj.origin %} {{ row.obj.origin }}{% endif %}
+                {% if row.obj.destination %} &nbsp;•&nbsp; ->  {{ row.obj.destination }}{% endif %}
               </div>
             </td>
             <td class="text-end">{{ row.obj.qty|default:"-" }}</td>

@@ -1,0 +1,447 @@
+# sales/views.py
+import datetime
+from typing import Iterable
+
+from django.http import JsonResponse, HttpRequest, HttpResponse
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.views.decorators.http import require_http_methods
+from django.forms import formset_factory
+from django import forms
+from django.apps import apps
+from django.urls import reverse
+from sales.models import ModeService, LocationRule, TransportMode
+
+from .forms import FreightHeaderForm  # service_option = CharField (validasi di clean_service_option)
+from .models import (
+    FreightQuotation,
+    FreightCargo,
+    ModeService,
+    LocationRule,
+    ServiceOption,  # pastikan ada di models
+)
+
+from datetime import timedelta
+from sales.utils_quo import generate_quotation_number, get_default_valid_days
+
+# ============================================================
+# Konstanta & Helpers
+# ============================================================
+WZ_SESSION_KEY = "fq_wizard"
+WZ_SESSION_KEY_OLD = "fq_wizard_v2"  # jaga-jaga sisa key lama
+
+def _service_choices_for_mode(mode_code: str) -> list[tuple[str, str]]:
+    """List[(code, name)] service yang diizinkan untuk mode tertentu (SEA/AIR/INLAND)."""
+    code = (mode_code or "").strip()
+    qs = (
+        ModeService.objects
+        .filter(mode__code__iexact=code)
+        .select_related("service")
+        .order_by("service__name")
+    )
+    return [(ms.service.code, ms.service.name) for ms in qs]
+
+def _normalize_service_code(mode_code: str, raw_value: str) -> str | None:
+    """
+    Kembalikan kode service yang sah untuk mode; fallback ke pilihan pertama.
+    Menutup kasus: user submit kosong/invalid → pilih default pertama agar Next tidak gagal.
+    """
+    mode = (mode_code or "").strip()
+    raw  = (raw_value or "").strip()
+    if not mode:
+        return None
+    # 1) cocok langsung sebagai kode
+    if raw and ModeService.objects.filter(mode__code=mode, service__code=raw).exists():
+        return raw
+    # 2) cocok nama
+    if raw:
+        svc = ServiceOption.objects.filter(name__iexact=raw).first()
+        if svc and ModeService.objects.filter(mode__code=mode, service=svc).exists():
+            return svc.code
+    # 3) fallback: ambil pertama
+    first = (
+        ModeService.objects
+        .filter(mode__code=mode)
+        .select_related("service")
+        .order_by("service__name")
+        .first()
+    )
+    return first.service.code if first else None
+
+def _customer_model():
+    """Model FK dari FreightQuotation.customer."""
+    return FreightQuotation._meta.get_field("customer").remote_field.model
+
+def _pick_any_customer():
+    """Ambil satu customer untuk Test Mode."""
+    Customer = _customer_model()
+    return Customer.objects.order_by("pk").first()
+
+def _get_location_qs_by_type(type_code: str):
+    """
+    Kembalikan queryset Location berdasar type.
+    Catatan: beberapa schema pakai field 'type', sebagian 'loc_type'. Kita handle keduanya.
+    """
+    Location = apps.get_model("geo", "Location")
+    if hasattr(Location, "loc_type"):
+        return Location.objects.filter(loc_type=type_code).order_by("name")
+    return Location.objects.filter(type=type_code).order_by("name")
+
+
+# ============================================================
+# (Masih disediakan) AJAX service options — tidak dipakai di Header (server-side),
+# tapi boleh tetap ada jika nantinya ingin dipakai komponen lain.
+# ============================================================
+def freight_service_options(request: HttpRequest) -> JsonResponse:
+    mode_code = (request.GET.get("mode") or "").strip()
+    data = [{"id": c, "text": n} for c, n in _service_choices_for_mode(mode_code)] if mode_code else []
+    return JsonResponse({"results": data})
+
+
+# ============================================================
+# Utils (Reset & Debug)
+# ============================================================
+def freight_wizard_reset(request: HttpRequest) -> HttpResponse:
+    """Reset semua kunci session wizard dan kembali ke Header."""
+    request.session.pop(WZ_SESSION_KEY, None)
+    request.session.pop(WZ_SESSION_KEY_OLD, None)
+    for key in list(request.session.keys()):
+        if key.startswith("fq_wizard"):
+            request.session.pop(key, None)
+    request.session.modified = True
+    return redirect("sales:freight_new")
+
+def freight_wizard_debug(request: HttpRequest) -> JsonResponse:
+    """Lihat isi session wizard untuk inspeksi cepat."""
+    data = {
+        "wizard": request.session.get(WZ_SESSION_KEY),
+        "wizard_v2": request.session.get(WZ_SESSION_KEY_OLD),
+        "all_keys": list(request.session.keys()),
+    }
+    return JsonResponse(data)
+
+
+# ============================================================
+# Form untuk STEP Lines (inline, cepat)
+# ============================================================
+class CargoLineForm(forms.Form):
+    origin = forms.ModelChoiceField(queryset=None, required=True, widget=forms.Select(attrs={"class": "form-select"}))
+    destination = forms.ModelChoiceField(queryset=None, required=True, widget=forms.Select(attrs={"class": "form-select"}))
+    description = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={"class": "form-control"}))
+    qty = forms.IntegerField(min_value=1, initial=1, required=True, widget=forms.NumberInput(attrs={"class": "form-control"}))
+    weight_kg = forms.DecimalField(max_digits=12, decimal_places=3, required=False, widget=forms.NumberInput(attrs={"class": "form-control"}))
+    volume_cbm = forms.DecimalField(max_digits=12, decimal_places=3, required=False, widget=forms.NumberInput(attrs={"class": "form-control"}))
+    price = forms.DecimalField(max_digits=14, decimal_places=2, required=False, widget=forms.NumberInput(attrs={"class": "form-control"}))
+    amount = forms.DecimalField(max_digits=14, decimal_places=2, required=False, widget=forms.NumberInput(attrs={"class": "form-control"}))
+
+    def __init__(self, *args, **kwargs):
+        origin_qs = kwargs.pop("origin_qs")
+        dest_qs = kwargs.pop("dest_qs")
+        super().__init__(*args, **kwargs)
+        self.fields["origin"].queryset = origin_qs
+        self.fields["destination"].queryset = dest_qs
+
+CargoFormSet = formset_factory(CargoLineForm, extra=1, can_delete=True)
+
+
+# ============================================================
+# Wizard Utama: STEP 1 (Header) → STEP 2 (Lines)
+# ============================================================
+@require_http_methods(["GET", "POST"])
+def freight_create_wizard(request: HttpRequest) -> HttpResponse:
+    # ---------- Reset lewat query ----------
+    if request.method == "GET" and request.GET.get("reset") == "1":
+        request.session.pop(WZ_SESSION_KEY, None)
+        request.session.pop(WZ_SESSION_KEY_OLD, None)
+        request.session.modified = True
+        return redirect("sales:freight_new")
+
+    # ---------- TEST MODE (skip Header langsung isi session) ----------
+    if request.method == "GET" and request.GET.get("test"):
+        customer = _pick_any_customer()
+        if not customer:
+            messages.error(request, "Test gagal: tidak ada data customer.")
+            return redirect("sales:freight_new")
+
+        transport_mode = "SEA"
+        service_option = request.GET.get("test").upper()  # contoh: D2D / P2P
+
+        if not ModeService.objects.filter(mode__code=transport_mode, service__code=service_option).exists():
+            messages.error(request, f"Test gagal: ModeService {transport_mode}+{service_option} belum ada.")
+            return redirect("sales:freight_new")
+
+        try:
+            lr = LocationRule.objects.get(mode__code=transport_mode, service__code=service_option)
+        except LocationRule.DoesNotExist:
+            messages.error(request, f"Test gagal: LocationRule {transport_mode}+{service_option} belum ada.")
+            return redirect("sales:freight_new")
+
+        request.session[WZ_SESSION_KEY] = {
+            "valid_until": str(datetime.date.today()),
+            "customer_id": customer.pk,
+            "currency": "IDR",
+            "payment_term": "CASH",
+            "transport_mode": transport_mode,
+            "service_option": service_option,
+            "origin_type": lr.origin_type,
+            "destination_type": lr.destination_type,
+            "notes": "",
+        }
+        request.session.modified = True
+        # arahkan jelas ke Lines
+        return redirect(reverse("sales:freight_new") + "?step=lines")
+
+    # ---------- Tentukan step ----------
+    state = request.session.get(WZ_SESSION_KEY) or request.session.get(WZ_SESSION_KEY_OLD)
+
+    # Default: GET tanpa step=lines → selalu tampil Header (agar tidak “terkunci” di Lines)
+    if request.method == "GET" and request.GET.get("step") != "lines":
+        state = None
+
+    step = "header" if not state else "lines"
+
+    # ---------- STEP 1: HEADER ----------
+    if step == "header":
+        if request.method == "POST":
+            # Normalisasi service_option supaya pasti valid (fallback pilih pertama)
+            data = request.POST.copy()
+            mode_from_post = data.get("transport_mode")
+            data["service_option"] = _normalize_service_code(mode_from_post, data.get("service_option"))
+
+            initial = state or {}
+
+            # default valid_until (QUO_VALID_DAYS)
+            days = get_default_valid_days("FREIGHT")  # kalau global juga ok
+            if not initial.get("valid_until"):
+                initial["valid_until"] = datetime.date.today() + timedelta(days=days)
+            
+            form = FreightHeaderForm(data)
+
+            if form.is_valid():
+                cd = form.cleaned_data
+                try:
+                    lr = LocationRule.objects.get(
+                        mode__code=cd["transport_mode"],
+                        service__code=cd["service_option"],
+                    )
+                except LocationRule.DoesNotExist:
+                    messages.error(request, "Location rule Mode+Service belum tersedia.")
+                    svc_choices = _service_choices_for_mode(cd["transport_mode"])
+                    return render(request, "sales/wizard_header.html", {
+                        "form": form, "service_choices": svc_choices, "current_service": cd["service_option"]
+                    })
+
+                request.session[WZ_SESSION_KEY] = {
+                    "valid_until": str(cd["valid_until"]),
+                    "customer_id": cd["customer"].pk,
+                    "currency": cd["currency"],
+                    "payment_term": cd["payment_term"],
+                    "transport_mode": cd["transport_mode"],
+                    "service_option": cd["service_option"],  # sdh kode
+                    "origin_type": lr.origin_type,
+                    "destination_type": lr.destination_type,
+                    "notes": cd.get("notes", ""),
+                }
+                request.session.modified = True
+                return redirect(reverse("sales:freight_new") + "?step=lines")
+
+            # invalid → render ulang dengan service_choices dari mode saat ini
+            mode_eff = data.get("transport_mode")
+            svc_choices = _service_choices_for_mode(mode_eff)
+            return render(request, "sales/wizard_header.html", {
+                "form": form, "service_choices": svc_choices, "current_service": data.get("service_option")
+            })
+        else:
+            # GET awal: siapkan pilihan service dari server (tanpa AJAX)
+            initial = state or {}
+            mode_eff = initial.get("transport_mode")
+            if not mode_eff:
+                ms = ModeService.objects.select_related("mode").order_by("mode__name", "service__name").first()
+                mode_eff = ms.mode.code if ms else ""
+            svc_choices = _service_choices_for_mode(mode_eff)
+            current_service = initial.get("service_option") or (svc_choices[0][0] if svc_choices else "")
+            form = FreightHeaderForm(initial={**initial, "transport_mode": mode_eff, "service_option": current_service})
+            return render(request, "sales/wizard_header.html", {
+                "form": form, "service_choices": svc_choices, "current_service": current_service
+            })
+
+    # ---------- STEP 2: LINES ----------
+    if not state:
+        return redirect("sales:freight_new")
+
+    origin_qs = _get_location_qs_by_type(state["origin_type"])
+    dest_qs = _get_location_qs_by_type(state["destination_type"])
+
+    if request.method == "POST":
+        # Guard: jika management form tidak ikut, jangan lanjut (biar jelas pesannya)
+        if "cargo-TOTAL_FORMS" not in request.POST:
+            messages.error(request, "Form tidak lengkap: TOTAL_FORMS/INITIAL_FORMS tidak terkirim. Pastikan tombol Finish berada di dalam form.")
+            formset = CargoFormSet(prefix="cargo", form_kwargs={"origin_qs": origin_qs, "dest_qs": dest_qs})
+            return render(request, "sales/wizard_lines.html", {
+                "formset": formset,
+                "mode": state["transport_mode"],
+                "service": state["service_option"],
+                "origin_type": state.get("origin_type"),
+                "destination_type": state.get("destination_type"),
+            })
+
+        formset = CargoFormSet(
+            request.POST,
+            prefix="cargo",
+            form_kwargs={"origin_qs": origin_qs, "dest_qs": dest_qs},
+        )
+        if formset.is_valid():
+            # 1) simpan header — filter fields agar tidak kirim created_by jika tidak ada
+            payload = {
+                "number": generate_quotation_number(FreightQuotation, "FREIGHT"),
+                "valid_until": state["valid_until"],
+                "customer_id": state["customer_id"],
+                "currency": state["currency"],
+                "payment_term": state["payment_term"],
+                "transport_mode": state["transport_mode"],
+                "service_option": state["service_option"],
+                "notes": state.get("notes", ""),
+                "status": "DRAFT",
+            }
+            fq_fields = {f.name for f in FreightQuotation._meta.get_fields() if hasattr(f, "attname")}
+            if "created_by" in fq_fields and getattr(request, "user", None) and request.user.is_authenticated:
+                payload["created_by"] = request.user
+            fq = FreightQuotation.objects.create(**payload)
+
+            # 2) simpan cargo lines
+            bulk: list[FreightCargo] = []
+            for row in formset.cleaned_data:
+                if not row or row.get("DELETE"):
+                    continue
+                bulk.append(
+                    FreightCargo(
+                        quotation=fq,
+                        origin=row["origin"],
+                        destination=row["destination"],
+                        description=row.get("description", ""),
+                        qty=row.get("qty") or 1,
+                        weight_kg=row.get("weight_kg") or 0,
+                        volume_cbm=row.get("volume_cbm") or 0,
+                        price=row.get("price") or 0,
+                        amount=row.get("amount") or 0,
+                    )
+                )
+            if bulk:
+                FreightCargo.objects.bulk_create(bulk)
+
+            # 3) bersihkan session wizard
+            request.session.pop(WZ_SESSION_KEY, None)
+            request.session.modified = True
+
+            # 4) redirect ke halaman detail/list (pakai yang tersedia)
+            try:
+                return redirect("sales:freight_view", pk=fq.pk)
+            except Exception:
+                messages.success(request, f"Quotation #{fq.pk} berhasil dibuat.")
+                return redirect("sales:freight_list")
+        else:
+            messages.error(request, "Periksa isian cargo.")
+    else:
+        formset = CargoFormSet(
+            prefix="cargo",
+            form_kwargs={"origin_qs": origin_qs, "dest_qs": dest_qs},
+        )
+
+    return render(
+        request,
+        "sales/wizard_lines.html",
+        {
+            "formset": formset,
+            "mode": state["transport_mode"],
+            "service": state["service_option"],
+            "origin_type": state.get("origin_type"),
+            "destination_type": state.get("destination_type"),
+        },
+    )
+def freight_list(request):
+    qs = (FreightQuotation.objects
+          .select_related("customer")
+          .order_by("-date", "-id"))
+
+    # ---- filters (GET) ----
+    number      = (request.GET.get("number") or "").strip()
+    customer_id = (request.GET.get("customer_id") or "").strip()
+    mode        = (request.GET.get("mode") or "").strip()      # "SEA"/"AIR"/"LAND"
+    status      = (request.GET.get("status") or "").strip()
+    service     = (request.GET.get("service") or "").strip()   # "PORT_TO_PORT", dst
+    date_from   = parse_date(request.GET.get("date_from") or "")
+    date_to     = parse_date(request.GET.get("date_to") or "")
+
+    if number:
+        qs = qs.filter(number__icontains=number)
+    if customer_id.isdigit():
+        qs = qs.filter(customer_id=int(customer_id))
+    if mode:
+        qs = qs.filter(transport_mode=mode)
+    if status:
+        qs = qs.filter(status=status)
+    if service:
+        qs = qs.filter(service_option=service)
+    if date_from:
+        qs = qs.filter(date__gte=date_from)
+    if date_to:
+        qs = qs.filter(date__lte=date_to)
+
+    # === dropdown data ===
+    # Customer options (id, label)
+    customer_options = []
+    for c in get_customer_queryset():
+        label = (getattr(c, "name", None)
+                 or getattr(c, "company_name", None)
+                 or getattr(c, "code", None)
+                 or f"Customer #{c.id}")
+        customer_options.append((c.id, label))
+
+    # Mode choices langsung dari model
+    mode_choices = FreightQuotation._meta.get_field("transport_mode").choices or []
+
+    # Service choices: tergantung mode; jika mode kosong -> gabungan semua unik
+    model_service_choices = FreightQuotation._meta.get_field("service_option").choices or []
+    if mode:
+        service_choices = SERVICE_BY_MODE.get(mode, model_service_choices)
+    else:
+        seen = set(); merged = []
+        for k in ("SEA","AIR","LAND"):
+            for code,label in SERVICE_BY_MODE.get(k, []):
+                if code not in seen:
+                    merged.append((code,label))
+                    seen.add(code)
+        service_choices = merged or model_service_choices
+
+    ctx = {
+        "quotations": qs,
+        "filters": {
+            "number": number,
+            "customer_id": customer_id,
+            "mode": mode,
+            "status": status,
+            "service": service,
+            "date_from": request.GET.get("date_from", ""),
+            "date_to": request.GET.get("date_to", ""),
+        },
+        "status_choices": FreightQuotation.STATUS_CHOICES,
+        "customer_options": customer_options,
+        "mode_choices": mode_choices,
+        "service_choices": service_choices,                 # ← sudah terfilter sesuai mode
+        "service_by_mode_json": json.dumps(SERVICE_BY_MODE) # ← untuk JS di template
+    }
+    return render(request, "sales/freight/list.html", ctx)
+
+def _service_choices_for_mode(mode_code: str):
+    qs = (ModeService.objects
+          .filter(mode__code__iexact=(mode_code or ""))
+          .select_related("service")
+          .order_by("service__name"))
+    return [(ms.service.code, ms.service.name) for ms in qs]
+
+def _default_mode_code():
+    # default ke SEA jika ada; kalau tidak, ambil mode pertama
+    if TransportMode.objects.filter(code__iexact="SEA").exists():
+        return "SEA"
+    first = TransportMode.objects.order_by("name").first()
+    return first.code if first else ""

@@ -3,7 +3,6 @@ from __future__ import annotations
 from django import forms
 from django.forms import formset_factory
 from sales.models import FreightQuotation, Setting
-from datetime import datetime  # <-- tambahkan
 
 def _get_setting(key: str, default=None):
     row = Setting.objects.filter(key=key).only("value").first()
@@ -47,31 +46,12 @@ class FreightHeaderForm(forms.ModelForm):
             "transport_mode", "service_option", "notes",
         ]
         widgets = {
-            "valid_until": forms.TextInput(attrs={
-                "class": "form-control",
-                "id": "id_valid_until",
-                "placeholder": "dd-mm-yy",
-                "autocomplete": "off",
-            }),
+            "valid_until": forms.DateInput(attrs={"type": "date", "class": "form-control", "id": "id_valid_until"}),
             "customer": forms.Select(attrs={"class": "form-select", "id": "id_customer"}),
             "transport_mode": forms.Select(attrs={"class": "form-select", "id": "id_transport_mode"}),
             "service_option": forms.Select(attrs={"class": "form-select", "id": "id_service_option"}),
             "notes": forms.Textarea(attrs={"class": "form-control", "id": "id_notes", "rows": 3}),
         }
-        def clean_valid_until(self):
-            """
-            Terima dd-mm-yy (prioritas), fallback YYYY-MM-DD -> kembalikan date()
-            """
-            v = self.cleaned_data.get("valid_until")
-            if isinstance(v, str):
-                s = v.strip()
-                for fmt in ("%d-%m-%y", "%Y-%m-%d"):
-                    try:
-                        return datetime.strptime(s, fmt).date()
-                    except ValueError:
-                        continue
-                raise forms.ValidationError("Format tanggal tidak valid. Gunakan dd-mm-yy.")
-            return v
 
 
 # ---------- STEP Lines: form ringan per baris ----------
@@ -94,6 +74,3 @@ class CargoLineForm(forms.Form):
 
 
 CargoFormSet = formset_factory(CargoLineForm, extra=1, can_delete=True)
-
-
-# --- tambahkan method di dalam class FreightHeaderForm ---
