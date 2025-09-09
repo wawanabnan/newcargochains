@@ -1,47 +1,101 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Freight Quotation Wizard{% endblock %}
 
 {% block content %}
-<div class="container-fluid py-3">
+<div class="container-fluid py-3 wizard">
   <h1 class="h5 mb-3">Freight Quotation Wizard</h1>
 
-  {# ====================== STEP 1: HEADER ====================== #}
+  {# ====================== STEP 1: HEADER (HTML murni) ====================== #}
   {% if step == "header" %}
     <div class="card shadow-sm">
       <div class="card-header">Header Information</div>
       <div class="card-body">
         {{ form_header.non_field_errors }}
-        <form method="post" novalidate>
+        <form id="header-form" method="post" novalidate>
           {% csrf_token %}
           <div class="row g-3">
             <div class="col-md-3">
-              {{ form_header.date.label_tag }}{{ form_header.date }} {{ form_header.date.errors }}
-            </div>
+            <label class="form-label" for="id_valid_date">Valid Date</label>
+            <input type="text" id="id_valid_date" name="valid_date" class="form-control"
+                  value="{{ form_header.valid_date.value|default_if_none:'' }}">
+
+                   <!-- Input hidden yang DIKIRIM ke server -->
+                  <input type="hidden" id="id_date" name="date"
+                        value="{{ form_header.date.value|default_if_none:''|date:'Y-m-d' }}">
+
+                  
+            {% for e in form_header.valid_date.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+          </div>
+
             <div class="col-md-5">
-              {{ form_header.customer.label_tag }}{{ form_header.customer }} {{ form_header.customer.errors }}
-            </div>
-            <div class="col-md-2">
-              {{ form_header.currency.label_tag }}{{ form_header.currency }} {{ form_header.currency.errors }}
-            </div>
-            <div class="col-md-2">
-              {{ form_header.payment_term.label_tag }}{{ form_header.payment_term }} {{ form_header.payment_term.errors }}
-            </div>
-
-            <div class="col-md-3">
-              {{ form_header.transport_mode.label_tag }}{{ form_header.transport_mode }} {{ form_header.transport_mode.errors }}
-            </div>
-
-            <div class="col-md-3">
-              <label for="id_service_option" class="form-label">Service Option</label>
-              <select name="service_option" id="id_service_option" class="form-select form-select-sm">
-                <option value="">-- pilih service --</option>
+              <label class="form-label" for="id_customer">Customer</label>
+              <select id="id_customer" name="customer" class="form-select">
+                <option value="">Select customer</option>
+                {% for obj in form_header.customer.field.queryset %}
+                  <option value="{{ obj.pk }}"
+                          {% if form_header.customer.value|stringformat:"s" == obj.pk|stringformat:"s" %}selected{% endif %}>
+                    {{ obj }}
+                  </option>
+                {% endfor %}
               </select>
-              {{ form_header.service_option.errors }}
+              {% for e in form_header.customer.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="col-md-2">
+              <label class="form-label" for="id_currency">Currency</label>
+              <select id="id_currency" name="currency" class="form-select">
+                <option value="">Select currency</option>
+                {% for val,label in form_header.currency.field.choices %}
+                  {% if val %}
+                    <option value="{{ val }}" {% if form_header.currency.value == val %}selected{% endif %}>{{ label }}</option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+              {% for e in form_header.currency.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="col-md-2">
+              <label class="form-label" for="id_payment_term">Payment Term</label>
+              <select id="id_payment_term" name="payment_term" class="form-select">
+                <option value="">Select payment term</option>
+                {% for val,label in form_header.payment_term.field.choices %}
+                  {% if val %}
+                    <option value="{{ val }}" {% if form_header.payment_term.value == val %}selected{% endif %}>{{ label }}</option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+              {% for e in form_header.payment_term.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label" for="id_transport_mode">Freight Type</label>
+              <select id="id_transport_mode" name="transport_mode" class="form-select">
+                <option value="">Select Freight Type</option>
+                {% for val,label in form_header.transport_mode.field.choices %}
+                  {% if val %}
+                    <option value="{{ val }}" {% if form_header.transport_mode.value == val %}selected{% endif %}>{{ label }}</option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+              {% for e in form_header.transport_mode.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label" for="id_service_option">Services</label>
+              <select id="id_service_option" name="service_option" class="form-select">
+                <option value="">Select Services</option>
+                {# akan diisi via JS sesuai transport_mode #}
+              </select>
+              {% for e in form_header.service_option.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
             </div>
 
             <div class="col-md-6">
-              {{ form_header.notes.label_tag }}{{ form_header.notes }} {{ form_header.notes.errors }}
+              <label class="form-label" for="id_notes">Notes</label>
+              <textarea id="id_notes" name="notes" rows="2" class="form-control"
+                        placeholder="Optional">{{ form_header.notes.value|default_if_none:'' }}</textarea>
+              {% for e in form_header.notes.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
             </div>
           </div>
 
@@ -53,113 +107,68 @@
       </div>
     </div>
 
-    {# JS Step 1: Service Option dinamis & selalu ikut submit #}
-    <script>
-    (function(){
-      const form  = document.querySelector('form');
-      const mode  = document.getElementById('id_transport_mode');
-      const svc   = document.getElementById('id_service_option');
-      if(!form || !mode || !svc) return;
-
-      function resetSvc(){
-        svc.innerHTML = '<option value="">-- pilih service --</option>';
-        svc.value = '';
-        svc.removeAttribute('disabled');
-      }
-      async function loadSvc(){
-        resetSvc();
-        const m = (mode.value || '').toUpperCase();
-        if(!m) return;
-        try{
-          const url = "{% url 'sales:freight_service_options' %}?mode=" + encodeURIComponent(m);
-          const r = await fetch(url, {credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
-          const data = await r.json();
-          const list = Array.isArray(data) ? data : (data.options || []);
-          for(const opt of list){
-            const val = (typeof opt==='object') ? (opt.value ?? opt[0]) : opt?.[0];
-            const lab = (typeof opt==='object') ? (opt.label ?? opt[1]) : opt?.[1];
-            if(!val) continue;
-            svc.add(new Option(String(lab ?? val), String(val)));
-          }
-        }catch(e){ /* biarkan kosong */ }
-      }
-      if (mode.value) loadSvc(); else resetSvc();
-      mode.addEventListener('change', loadSvc);
-
-      form.addEventListener('submit', ()=>{
-        svc.removeAttribute('disabled'); // pastikan terkirim
-      });
-    })();
-    </script>
-
-  {# ====================== STEP 2: CARGO ====================== #}
+  {# ====================== STEP 2: LINES (HTML murni) ====================== #}
   {% elif step == "lines" %}
-    <form method="post" novalidate>
+    <form id="lines-form" method="post" novalidate>
       {% csrf_token %}
       {{ cargo_fs.management_form }}
 
       <div class="row g-3">
-        {# ------- KIRI: Cargo Detail (Origin/Destination di paling atas) ------- #}
+        {# KIRI: form input user #}
         <div class="col-lg-5">
           <div class="card shadow-sm h-100">
             <div class="card-header">Cargo Detail</div>
-            <div class="card-body" id="add-form">
-              <div class="row g-2">
+            <div class="card-body">
+              <div class="row g-2" id="add-form">
                 <div class="col-6">
-                  <label class="form-label">Origin</label>
-                  {{ cargo_fs.empty_form.origin }}
+               <label class="form-label" for="add-origin">Origin</label>
+                  <select id="add-origin" class="form-select">
+                    <option value="">Select origin</option>
+                  </select>
                 </div>
                 <div class="col-6">
-                  <label class="form-label">Destination</label>
-                  {{ cargo_fs.empty_form.destination }}
+                  <label class="form-label" for="add-destination">Destination</label>
+                  <select id="add-destination" class="form-select">
+                    <option value="">Select destination</option>
+                  </select>
                 </div>
 
                 <div class="col-12">
-                  <label class="form-label">Description</label>
-                  {{ cargo_fs.empty_form.description }}
+                  <label class="form-label" for="add-desc">Description</label>
+                  <input id="add-desc" type="text" class="form-control" placeholder="e.g. 10 cartons electronics">
                 </div>
 
                 <div class="col-4">
-                  <label class="form-label">Qty</label>
-                  {{ cargo_fs.empty_form.qty }}
+                  <label class="form-label" for="add-qty">Qty</label>
+                  <input id="add-qty" type="number" step="1" min="0" class="form-control">
                 </div>
                 <div class="col-4">
-                  <label class="form-label">Weight (kg)</label>
-                  {{ cargo_fs.empty_form.weight_kg }}
+                  <label class="form-label" for="add-weight">Weight (kg)</label>
+                  <input id="add-weight" type="number" step="0.01" min="0" class="form-control">
                 </div>
                 <div class="col-4">
-                  <label class="form-label">Volume (cbm)</label>
-                  {{ cargo_fs.empty_form.volume_cbm }}
+                  <label class="form-label" for="add-volume">Volume (cbm)</label>
+                  <input id="add-volume" type="number" step="0.001" min="0" class="form-control">
                 </div>
 
                 <div class="col-6">
-                  <label class="form-label">Price</label>
-                  {{ cargo_fs.empty_form.price }}
-                </div>
-                <div class="col-6">
-                  <label class="form-label">Amount</label>
-                  {{ cargo_fs.empty_form.amount }}
-                </div>
+                <label class="form-label" for="add-price">Price</label>
+                <input id="add-price" type="number" step="0.01" min="0" class="form-control">
               </div>
-            </div>
-            <div class="card-footer d-flex gap-2">
-              <a href="?step=header" class="btn btn-outline-secondary rounded-0">← Back</a>
-              <button type="button" id="btn-add-cargo" class="btn btn-primary rounded-0">+ Add Cargo</button>
+              <div class="col-6">
+                <label class="form-label" for="add-amount">Amount</label>
+                <input id="add-amount" type="number" step="0.01" min="0" class="form-control" readonly>
+              </div>
+
+              </div>
             </div>
           </div>
         </div>
 
-        {# ------- KANAN: Box kanan awalnya kosong; tabel muncul setelah Add ------- #}
+        {# KANAN: tabel hasil tambah cargo #}
         <div class="col-lg-7">
           <div class="card shadow-sm h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <span>Daftar Cargo</span>
-              <div id="finish-wrap" class="d-none">
-                <button id="btn-finish" class="btn btn-success btn-sm rounded-0" type="submit" name="finish" value="1">
-                  Finish / Save
-                </button>
-              </div>
-            </div>
+            <div class="card-header">Daftar Cargo</div>
             <div class="card-body p-0">
               <div id="empty-hint" class="p-3 text-center text-muted">Belum ada cargo.</div>
               <div id="cargo-table-wrap" class="table-responsive d-none">
@@ -186,20 +195,20 @@
         </div>
       </div>
 
-      {# ------- Template baris baru; input asli disimpan tersembunyi agar ikut POST ------- #}
+      {# Template baris: hidden inputs mengikuti naming formset cargo-__prefix__-field #}
       <template id="cargo-row-template">
         <tr class="cargo-row">
           <td class="row-no"></td>
           <td>
             <div class="d-none">
-              {{ cargo_fs.empty_form.description }}
-              {{ cargo_fs.empty_form.qty }}
-              {{ cargo_fs.empty_form.weight_kg }}
-              {{ cargo_fs.empty_form.volume_cbm }}
-              {{ cargo_fs.empty_form.price }}
-              {{ cargo_fs.empty_form.amount }}
-              {{ cargo_fs.empty_form.origin }}
-              {{ cargo_fs.empty_form.destination }}
+              <input type="text"   name="cargo-__prefix__-description"  id="id_cargo-__prefix__-description">
+              <input type="number" name="cargo-__prefix__-qty"          id="id_cargo-__prefix__-qty">
+              <input type="number" name="cargo-__prefix__-weight_kg"    id="id_cargo-__prefix__-weight_kg" step="0.01">
+              <input type="number" name="cargo-__prefix__-volume_cbm"   id="id_cargo-__prefix__-volume_cbm" step="0.001">
+              <input type="number" name="cargo-__prefix__-price"        id="id_cargo-__prefix__-price" step="0.01">
+              <input type="number" name="cargo-__prefix__-amount"       id="id_cargo-__prefix__-amount" step="0.01">
+              <input type="text"   name="cargo-__prefix__-origin"       id="id_cargo-__prefix__-origin">
+              <input type="text"   name="cargo-__prefix__-destination"  id="id_cargo-__prefix__-destination">
             </div>
             <span class="cell-desc"></span>
           </td>
@@ -210,175 +219,292 @@
           <td class="text-end cell-volume"></td>
           <td class="text-end cell-price"></td>
           <td class="text-end cell-amount"></td>
-          <td>
-            <button type="button" class="btn btn-outline-danger btn-sm rounded-0 btn-remove">Remove</button>
-          </td>
+          <td><button type="button" class="btn btn-outline-danger btn-sm rounded-0 btn-remove">Remove</button></td>
         </tr>
       </template>
+
+      <div class="mt-3 d-flex justify-content-between toolbar-sticky px-2 py-2 rounded-bottom">
+      <div class="d-flex gap-2">
+        <a href="?step=header" class="btn btn-outline-secondary rounded-0">← Back</a>
+        <a href="{% url 'sales:freight_list' %}" class="btn btn-outline-danger rounded-0">Cancel</a>
+      </div>
+      <div class="d-flex gap-2">
+        <button type="button" id="btn-add-cargo" class="btn btn-primary rounded-0">+ Add Cargo</button>
+        <button id="btn-finish" class="btn btn-success rounded-0 d-none" type="submit" name="finish" value="1">
+          Finish / Save
+        </button>
+      </div>
+    </div>
+
     </form>
-
-    {# ====================== JS Step 2 ====================== #}
-    <script>
-    (function(){
-      // ---- helpers
-      async function j(url){
-        const r = await fetch(url, {credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
-        if(!r.ok) throw new Error('HTTP '+r.status);
-        return r.json();
-      }
-      function calcAmount(q, p){
-        const qq = parseFloat(q||'0'), pp = parseFloat(p||'0');
-        return (!isNaN(qq) && !isNaN(pp)) ? (qq*pp).toFixed(2) : '';
-      }
-      function setHidden(root, suffix, val){
-        const el = root.querySelector(`[name$="${suffix}"]`);
-        if (el) el.value = val ?? '';
-      }
-
-      // ---- endpoints
-      const URL_STATE = "{% url 'sales:freight_wizard_state' %}";
-      const URL_LOC   = "{% url 'sales:freight_location_options' %}";
-
-      // ---- DOM refs
-      const addForm   = document.getElementById('add-form');
-      const addBtn    = document.getElementById('btn-add-cargo');
-      const rowsWrap  = document.getElementById('cargo-rows');
-      const tableWrap = document.getElementById('cargo-table-wrap');
-      const emptyHint = document.getElementById('empty-hint');
-      const finishWrap= document.getElementById('finish-wrap');
-      const tmpl      = document.getElementById('cargo-row-template');
-      const totalInp  = document.getElementById('id_cargo-TOTAL_FORMS');
-      if (!addForm || !addBtn || !rowsWrap || !tmpl || !totalInp) return;
-
-      // fields kiri
-      const fOrigin = addForm.querySelector('select[name$="-origin"]');
-      const fDest   = addForm.querySelector('select[name$="-destination"]');
-      const fDesc   = addForm.querySelector('[name$="-description"]');
-      const fQty    = addForm.querySelector('[name$="-qty"]');
-      const fW      = addForm.querySelector('[name$="-weight_kg"]');
-      const fV      = addForm.querySelector('[name$="-volume_cbm"]');
-      const fP      = addForm.querySelector('[name$="-price"]');
-      const fA      = addForm.querySelector('[name$="-amount"]');
-
-      // ---- isi Origin/Destination NAMA SAJA sesuai wizard state; jangan auto-select
-      function fillSelect(sel, names){
-        if(!sel) return;
-        sel.innerHTML = '';
-        sel.add(new Option('-- pilih --', ''));         // placeholder
-        (names||[]).forEach(n => sel.add(new Option(String(n), String(n)))); // value=text=name
-        sel.value = '';                                  // nilai awal kosong → user harus pilih
-      }
-      async function hydrateOD(){
-        try{
-          const st = await j(URL_STATE); // {mode, service}
-          const mode = st.mode || '';
-          const service = st.service || '';
-          const o = await j(URL_LOC + "?role=origin&mode="+encodeURIComponent(mode)+"&service="+encodeURIComponent(service));
-          const d = await j(URL_LOC + "?role=destination&mode="+encodeURIComponent(mode)+"&service="+encodeURIComponent(service));
-          fillSelect(fOrigin, o.items || []);
-          fillSelect(fDest,   d.items || []);
-        }catch(e){
-          // minimal placeholder
-          if (fOrigin && !fOrigin.options.length) fillSelect(fOrigin, []);
-          if (fDest && !fDest.options.length)     fillSelect(fDest,   []);
-          console.warn('OD load failed', e);
-        }
-      }
-
-      // ---- UI helpers
-      function revealRightBox(){
-        emptyHint.classList.add('d-none');
-        tableWrap.classList.remove('d-none');
-        finishWrap.classList.remove('d-none');
-      }
-      function getPrefix(){
-        const m = (totalInp.id || '').match(/^id_(.+)-TOTAL_FORMS$/);
-        return m ? m[1] : 'cargo';
-      }
-      function reindexRows(){
-        const prefix = getPrefix();
-        const rows = Array.from(rowsWrap.querySelectorAll('tr.cargo-row'));
-        rows.forEach((row, i) => {
-          const no = row.querySelector('.row-no');
-          if (no) no.textContent = String(i+1);
-          row.querySelectorAll('.d-none [name]').forEach(el => {
-            const oldName = el.getAttribute('name');               // e.g. cargo-3-description
-            const newName = oldName.replace(new RegExp(`^${prefix}-\\d+-`), `${prefix}-${i}-`);
-            if (newName !== oldName) el.setAttribute('name', newName);
-          });
-          row.querySelectorAll('.d-none [id]').forEach(el => {
-            const oldId = el.getAttribute('id');                   // e.g. id_cargo-3-description
-            const newId = oldId.replace(new RegExp(`^id_${prefix}-\\d+-`), `id_${prefix}-${i}-`);
-            if (newId !== oldId) el.setAttribute('id', newId);
-          });
-        });
-        totalInp.value = String(rows.length);
-
-        if (rows.length === 0){
-          tableWrap.classList.add('d-none');
-          finishWrap.classList.add('d-none');
-          emptyHint.classList.remove('d-none');
-        } else {
-          tableWrap.classList.remove('d-none');
-          finishWrap.classList.remove('d-none');
-          emptyHint.classList.add('d-none');
-        }
-      }
-
-      // ---- tambah baris ke box kanan + hidden inputs agar ikut POST
-      function addRow(){
-        if (!fOrigin.value || !fDest.value || !fDesc.value){
-          alert('Origin, Destination, dan Description wajib diisi.');
-          return;
-        }
-        const idx = parseInt(totalInp.value || '0', 10);
-        const html = tmpl.innerHTML.replaceAll('__prefix__', String(idx));
-        const holder = document.createElement('tbody');
-        holder.innerHTML = html.trim();
-        const row = holder.firstElementChild;
-
-        const root = row.querySelector('.d-none');
-        const amountVal = fA.value || calcAmount(fQty.value, fP.value);
-        setHidden(root, '-origin',       fOrigin.value);
-        setHidden(root, '-destination',  fDest.value);
-        setHidden(root, '-description',  fDesc.value);
-        setHidden(root, '-qty',          fQty.value);
-        setHidden(root, '-weight_kg',    fW.value);
-        setHidden(root, '-volume_cbm',   fV.value);
-        setHidden(root, '-price',        fP.value);
-        setHidden(root, '-amount',       amountVal);
-
-        row.querySelector('.cell-desc').textContent        = fDesc.value || '';
-        row.querySelector('.cell-origin').textContent      = fOrigin.value || '';
-        row.querySelector('.cell-destination').textContent = fDest.value || '';
-        row.querySelector('.cell-qty').textContent         = fQty.value || '0';
-        row.querySelector('.cell-weight').textContent      = fW.value || '0';
-        row.querySelector('.cell-volume').textContent      = fV.value || '0';
-        row.querySelector('.cell-price').textContent       = fP.value || '0';
-        row.querySelector('.cell-amount').textContent      = amountVal || '0';
-
-        rowsWrap.appendChild(row);
-        revealRightBox();
-        reindexRows(); // termasuk update TOTAL_FORMS
-      }
-
-      // ---- remove baris (delegasi)
-      rowsWrap.addEventListener('click', function(ev){
-        const btn = ev.target.closest('.btn-remove');
-        if (!btn) return;
-        const tr = btn.closest('tr.cargo-row');
-        if (!tr) return;
-        // if (!confirm('Hapus cargo ini?')) return; // aktifkan jika perlu konfirmasi
-        tr.remove();
-        reindexRows();
-      });
-
-      // init
-      hydrateOD();                          // supaya OD punya opsi, tapi tetap nilai awal ""
-      addBtn.addEventListener('click', addRow);
-      reindexRows();                         // sinkron UI bila ada baris dari server (biasanya tidak, sesuai kebutuhan Anda)
-    })();
-    </script>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+
+<style>
+/* Form look & feel seragam (tanpa class injeksi Django) */
+.wizard .form-select, .wizard select {
+  width:100%;
+  background:#fff !important;
+  border:1px solid var(--bs-border-color, #ced4da) !important;
+  border-radius:.375rem !important;
+  padding:.375rem .75rem !important;
+  line-height:1.5 !important;
+  font-size:1rem !important;
+  height:calc(2.25rem + 2px) !important;
+  box-shadow:none !important;
+}
+.wizard .form-control, .wizard input, .wizard textarea {
+  background:#fff !important;
+  border:1px solid var(--bs-border-color, #ced4da) !important;
+  border-radius:.375rem !important;
+  padding:.375rem .75rem !important;
+  line-height:1.5 !important;
+  font-size:1rem !important;
+  box-shadow:none !important;
+}
+.wizard .form-select:focus, .wizard select:focus,
+.wizard .form-control:focus, .wizard input:focus, .wizard textarea:focus {
+  border-color:#86b7fe !important;
+  outline:0 !important;
+  box-shadow:0 0 0 .25rem rgba(13,110,253,.25) !important;
+}
+
+/* Toolbar bawah */
+.wizard .toolbar-sticky{position:sticky;bottom:0;z-index:10;background:var(--bs-body-bg,#fff);border-top:1px solid rgba(0,0,0,.08)}
+.wizard .toolbar-sticky .btn{min-width:110px}
+
+/* Pulihkan tampilan native date input */
+.wizard input[type="date"].form-control {
+  -webkit-appearance: auto !important;
+  appearance: auto !important;
+  background-color: #fff !important;
+  /* sisakan ruang kanan kalau ikon muncul */
+  padding-right: 2.25rem !important;
+}
+
+/* Pastikan indikator kalender tidak disembunyikan */
+.wizard input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 1 !important;
+  display: block !important;
+  cursor: pointer;
+}
+
+/* Hilangkan spinner number yang kadang ikut “nempel” */
+.wizard input[type="date"]::-webkit-inner-spin-button { display: none; }
+
+/* (Opsional) kalau ada CSS global yang border-0 / bg-transparent, netralkan */
+.wizard .border-0 input[type="date"],
+.wizard input[type="date"].bg-transparent {
+  background: #fff !important;
+  border: 1px solid var(--bs-border-color, #ced4da) !important;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
+<script>
+(function(){
+  // ===== Helpers umum =====
+  async function j(url){ const r=await fetch(url,{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}}); if(!r.ok) throw 0; return r.json(); }
+  function calcAmount(q,p){const qq=parseFloat(q||'0'),pp=parseFloat(p||'0');return(!isNaN(qq)&&!isNaN(pp))?(qq*pp).toFixed(2):'';}
+
+  // ===================== STEP 1 =====================
+  (function step1(){
+    const form = document.getElementById('header-form');
+    if(!form) return;
+    const uiDate = document.getElementById('id_valid_date');
+    const mode = document.getElementById('id_transport_mode');
+    const svc  = document.getElementById('id_service_option');
+    const hidDate = document.getElementById('id_date');      
+
+    if (uiDate && hidDate && window.flatpickr) {
+      const fp = flatpickr(uiDate, {
+        dateFormat: "d-m-Y",      // tampil dd-mm-yyyy
+        allowInput: true,
+        defaultDate: (hidDate.value || null)  // iso dari server -> set sebagai tanggal awal
+      });
+
+
+
+    if (!uiDate) return;
+      flatpickr(date, {
+      dateFormat: "d-m-Y",     // tampil & submit: dd-mm-yyyy
+      allowInput: true,
+    });
+
+    // Date picker on focus
+    if (date) date.addEventListener('focus',()=>{ try{ date.showPicker ? date.showPicker() : date.click(); }catch(e){} });
+
+    function resetSvc(){
+      if (!svc) return;
+      svc.innerHTML = '<option value="">Select Services</option>';
+      svc.value = '';
+    }
+    async function loadSvc(){
+      resetSvc();
+      const m = (mode?.value || '').toUpperCase(); if(!m) return;
+      try{
+        const url = "{% url 'sales:freight_service_options' %}?mode="+encodeURIComponent(m);
+        const data = await j(url);
+        const list = Array.isArray(data) ? data : (data.options || []);
+        list.forEach(opt=>{
+          const val = (typeof opt==='object') ? (opt.value ?? opt[0]) : opt?.[0];
+          const lab = (typeof opt==='object') ? (opt.label ?? opt[1]) : opt?.[1];
+          if (!val) return;
+          svc.add(new Option(String(lab ?? val), String(val)));
+        });
+      }catch(e){}
+    }
+    if (mode) {
+      if (mode.value) loadSvc(); else resetSvc();
+      mode.addEventListener('change', loadSvc);
+    }
+  })();
+
+  // ===================== STEP 2 =====================
+  (function step2(){
+    const form      = document.getElementById('lines-form');
+    if(!form) return;
+
+    const URL_STATE = "{% url 'sales:freight_wizard_state' %}";
+    const URL_LOC   = "{% url 'sales:freight_location_options' %}";
+
+    // Kiri (input user)
+    const fOrigin = document.getElementById('add-origin');
+    const fDest   = document.getElementById('add-destination');
+    const fDesc   = document.getElementById('add-desc');
+    const fQty    = document.getElementById('add-qty');
+    const fW      = document.getElementById('add-weight');
+    const fV      = document.getElementById('add-volume');
+    const fP      = document.getElementById('add-price');
+    const fA      = document.getElementById('add-amount');
+
+    const addBtn    = document.getElementById('btn-add-cargo');
+    const finishBtn = document.getElementById('btn-finish');
+    const rowsWrap  = document.getElementById('cargo-rows');
+    const tableWrap = document.getElementById('cargo-table-wrap');
+    const emptyHint = document.getElementById('empty-hint');
+    const tmpl      = document.getElementById('cargo-row-template');
+    const totalInp  = document.getElementById('id_cargo-TOTAL_FORMS');
+
+    function fillSelect(sel, arr, ph){
+      if (!sel) return;
+      sel.innerHTML = '';
+      sel.add(new Option(ph || '-- select --', ''));
+      (arr || []).forEach(n => sel.add(new Option(String(n), String(n))));
+      sel.value = '';
+    }
+    async function hydrateOD(){
+      try{
+        const st = await j(URL_STATE);
+        const m = st.mode || '', s = st.service || '';
+        const o = await j(URL_LOC + "?role=origin&mode="+encodeURIComponent(m)+"&service="+encodeURIComponent(s));
+        const d = await j(URL_LOC + "?role=destination&mode="+encodeURIComponent(m)+"&service="+encodeURIComponent(s));
+        fillSelect(fOrigin, o.items || [], 'Select origin');
+        fillSelect(fDest,   d.items || [], 'Select destination');
+      }catch(e){
+        fillSelect(fOrigin, [], 'Select origin');
+        fillSelect(fDest,   [], 'Select destination');
+      }
+    }
+    function revealRightBox(){ emptyHint.classList.add('d-none'); tableWrap.classList.remove('d-none'); finishBtn.classList.remove('d-none'); }
+    function getPrefix(){ const m=(totalInp.id||'').match(/^id_(.+)-TOTAL_FORMS$/); return m?m[1]:'cargo'; }
+    function reindexRows(){
+      const prefix=getPrefix();
+      const rows=[...rowsWrap.querySelectorAll('tr.cargo-row')];
+      rows.forEach((row,i)=>{
+        const no=row.querySelector('.row-no'); if(no) no.textContent=String(i+1);
+        row.querySelectorAll('.d-none [name]').forEach(el=>{
+          el.name = el.name.replace(new RegExp(`^${prefix}-\\d+-`), `${prefix}-${i}-`);
+        });
+        row.querySelectorAll('.d-none [id]').forEach(el=>{
+          el.id   = el.id.replace(new RegExp(`^id_${prefix}-\\d+-`), `id_${prefix}-${i}-`);
+        });
+      });
+      totalInp.value = String(rows.length);
+      if (rows.length===0){ tableWrap.classList.add('d-none'); finishBtn.classList.add('d-none'); emptyHint.classList.remove('d-none'); }
+    }
+
+    // hitung amount otomatis dan lock di UI
+    function updateAmount(){
+      const q  = parseFloat(fQty.value || '0');
+      const pr = parseFloat(fP.value   || '0');
+      if (!isNaN(q) && !isNaN(pr)) {
+        fA.value = (q * pr).toFixed(2);
+      } else {
+        fA.value = '';
+      }
+    }
+    ['input','change'].forEach(evt=>{
+      fQty.addEventListener(evt, updateAmount);
+      fP.addEventListener(evt,  updateAmount);
+    });
+    updateAmount(); // inisialisasi
+
+
+    function addRow(){
+      if (!fOrigin.value || !fDest.value || !fDesc.value){
+        alert('Origin, Destination, dan Description wajib diisi.'); return;
+      }
+      const idx = parseInt(totalInp.value || '0', 10);
+      const holder = document.createElement('tbody');
+      holder.innerHTML = tmpl.innerHTML.replaceAll('__prefix__', String(idx)).trim();
+      const row = holder.firstElementChild;
+
+      // set hidden values
+      const root = row.querySelector('.d-none');
+      updateAmount(); // pastikan amount terbaru
+      const amountVal = fA.value || calcAmount(fQty.value, fP.value);
+
+      root.querySelector('#id_cargo-__prefix__-origin').value       = fOrigin.value;
+      root.querySelector('#id_cargo-__prefix__-destination').value  = fDest.value;
+      root.querySelector('#id_cargo-__prefix__-description').value  = fDesc.value;
+      root.querySelector('#id_cargo-__prefix__-qty').value          = fQty.value;
+      root.querySelector('#id_cargo-__prefix__-weight_kg').value    = fW.value;
+      root.querySelector('#id_cargo-__prefix__-volume_cbm').value   = fV.value;
+      root.querySelector('#id_cargo-__prefix__-price').value        = fP.value;
+      root.querySelector('#id_cargo-__prefix__-amount').value       = amountVal;
+
+      // set visible cells
+      row.querySelector('.cell-desc').textContent        = fDesc.value || '';
+      row.querySelector('.cell-origin').textContent      = fOrigin.value || '';
+      row.querySelector('.cell-destination').textContent = fDest.value || '';
+      row.querySelector('.cell-qty').textContent         = fQty.value || '0';
+      row.querySelector('.cell-weight').textContent      = fW.value || '0';
+      row.querySelector('.cell-volume').textContent      = fV.value || '0';
+      row.querySelector('.cell-price').textContent       = fP.value || '0';
+      row.querySelector('.cell-amount').textContent      = amountVal || '0';
+
+      rowsWrap.appendChild(row);
+      revealRightBox();
+      reindexRows();
+    }
+
+    rowsWrap.addEventListener('click', ev=>{
+      const btn = ev.target.closest('.btn-remove'); if(!btn) return;
+      btn.closest('tr.cargo-row')?.remove();
+      reindexRows();
+    });
+
+    hydrateOD();
+    addBtn?.addEventListener('click', addRow);
+
+     document.getElementById('btn-finish')?.addEventListener('click', function(ev){
+      // jangan cegah default—biar form POST normal
+      // tapi pastikan TOTAL_FORMS ter-update dan amount sinkron
+      updateAmount();
+      // Tidak ada preventDefault di mana pun, jadi ini cukup
+      // (optional) disabled-kan tombol sebentar agar tidak double submit
+      this.setAttribute('disabled','disabled');
+      setTimeout(()=> this.removeAttribute('disabled'), 2000);
+    });
+  })();
+})();
+</script>
 {% endblock %}

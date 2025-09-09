@@ -37,6 +37,7 @@ class FreightQuotation(models.Model):
 
     number = models.CharField(max_length=50, unique=True, blank=True)
     date = models.DateField()
+    valid_until = models.DateField(null=True, blank=True)
     # TODO: Ganti ke model Customer/Partner Anda jika ada (mis. partners.Partner)
     customer = models.ForeignKey(Partner, on_delete=models.PROTECT)
     currency = models.CharField(max_length=10, default="IDR")
@@ -373,3 +374,48 @@ class FreightOrderLine(models.Model):
     def __str__(self):
         return f"{self.description} ({self.qty} x {self.price})"
     
+# sales/models.py
+class BusinessType(models.Model):
+    code = models.CharField(max_length=20, unique=True)   # contoh: FREIGHT, CHARTER
+    name = models.CharField(max_length=100)
+
+class TransportMode(models.Model):
+    code = models.CharField(max_length=20, unique=True)   # contoh: SEA, AIR, INLAND
+    name = models.CharField(max_length=100)
+
+class ServiceOption(models.Model):
+    code = models.CharField(max_length=20, unique=True)   # contoh: D2D, D2P, P2P, TRUCKING
+    name = models.CharField(max_length=100)
+
+class ModeService(models.Model):
+    mode = models.ForeignKey(TransportMode, on_delete=models.CASCADE)
+    service = models.ForeignKey(ServiceOption, on_delete=models.CASCADE)
+
+    class Meta:
+        unique_together = ("mode", "service")
+
+class LocationRule(models.Model):
+    mode = models.ForeignKey(TransportMode, on_delete=models.CASCADE)
+    service = models.ForeignKey(ServiceOption, on_delete=models.CASCADE)
+    origin_type = models.CharField(max_length=20, choices=[
+        ("CITY", "City"), ("SEAPORT", "Seaport"), ("AIRPORT", "Airport")
+    ])
+    destination_type = models.CharField(max_length=20, choices=[
+        ("CITY", "City"), ("SEAPORT", "Seaport"), ("AIRPORT", "Airport")
+    ])
+
+    class Meta:
+        unique_together = ("mode", "service")
+
+
+class PaymentTerm(models.Model):
+    code = models.CharField(max_length=20, unique=True)
+    name = models.CharField(max_length=100)
+
+    class Meta:
+        db_table = "payment_term"
+        ordering = ["code"]
+
+    def __str__(self):
+        return self.name
+

@@ -291,124 +291,232 @@
 {% block extra_js %}
 <script>
 (function(){
-  function ready(fn){ if(document.readyState!=='loading') fn(); else document.addEventListener('DOMContentLoaded', fn); }
+  // Utility untuk menunggu DOM siap
+  function onReady(fn){
+    if (document.readyState !== 'loading') fn();
+    else document.addEventListener('DOMContentLoaded', fn);
+  }
 
-  ready(function(){
-    const form       = document.getElementById('lines-form');
-    const addBtn     = document.getElementById('btn-add');
-    const finishBtn  = document.getElementById('btn-finish');
-    const rowsWrap   = document.getElementById('cargo-rows');
-    const tmpl       = document.getElementById('cargo-row-tmpl');
-    const totalInput = document.getElementById('id_cargo-TOTAL_FORMS');
+  onReady(function(){
 
-    // input sumber (kiri)
-    const inpDesc = document.getElementById('id_cargo-desc');
-    const inpQty  = document.getElementById('id_cargo-qty');
-    const inpWgt  = document.getElementById('id_cargo-weight');
-    const inpVol  = document.getElementById('id_cargo-volume');
-    const inpPrc  = document.getElementById('id_cargo-price');
-    const ddOrigin= document.getElementById('od-origin');
-    const ddDest  = document.getElementById('od-destination');
-
-    // Guard: pastikan semua ada
-    const must = {form,addBtn,finishBtn,rowsWrap,tmpl,totalInput,inpDesc,inpQty,inpWgt,inpVol,inpPrc,ddOrigin,ddDest};
-    for (const [k,v] of Object.entries(must)){
-      if(!v){ console.error('[Lines] Missing element:', k); }
+    // ===== Helpers umum =====
+    async function j(url){
+      const r = await fetch(url, {credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.json();
     }
-    if (!form || !addBtn || !rowsWrap || !tmpl || !totalInput) return;
-
-    if (form.dataset.bound === '1') return;
-    form.dataset.bound = '1';
-
     function calcAmount(q,p){
-      const qq = parseFloat(q||'0') || 0;
-      const pp = parseFloat(p||'0') || 0;
-      return (qq*pp).toFixed(2);
+      const qq=parseFloat(q||'0'), pp=parseFloat(p||'0');
+      return (!isNaN(qq)&&!isNaN(pp))?(qq*pp).toFixed(2):'';
     }
 
-    function reindex(){
-      const rows = Array.from(rowsWrap.querySelectorAll('tr.cargo-row'));
-      rows.forEach((row, i)=>{
-        // name
-        row.querySelectorAll('[name]').forEach(el=>{
-          const name = el.getAttribute('name') || '';
-          // ganti __prefix__ dulu, lalu normalisasi index
-          let n = name.replace('cargo-__prefix__-', `cargo-${i}-`);
-          n = n.replace(/cargo-\d+-/, `cargo-${i}-`);
-          el.setAttribute('name', n);
-        });
-        // id
-        row.querySelectorAll('[id]').forEach(el=>{
-          const id = el.id || '';
-          let nid = id.replace('id_cargo-__prefix__-', `id_cargo-${i}-`);
-          nid = nid.replace(/id_cargo-\d+-/, `id_cargo-${i}-`);
-          el.id = nid;
-        });
-        const no = row.querySelector('.row-no');
-        if (no) no.textContent = String(i+1);
-      });
-      totalInput.value = String(rows.length);
-    }
+    // ===================== STEP 1 (HEADER) =====================
+    (function step1(){
+      const form = document.getElementById('header-form');
+      if (!form) return;
 
-    function addRow(){
-      // Validasi minimal
-      if (!ddOrigin.value || !ddDest.value){
-        alert('Origin dan Destination wajib dipilih.');
-        return;
+      const validUntil = document.getElementById('id_valid_until');
+      validUntil?.addEventListener('focus', ()=>{ try{ validUntil.showPicker ? validUntil.showPicker() : validUntil.click(); }catch(e){} });
+
+      const mode = document.getElementById('id_transport_mode');
+      const svc  = document.getElementById('id_service_option');
+
+      const INITIAL_MODE = "{{ form_header.transport_mode.value|default_if_none:'' }}";
+      const INITIAL_SVC  = "{{ form_header.service_option.value|default_if_none:'' }}";
+
+      function resetSvc(placeholder){
+        if (!svc) return;
+        svc.innerHTML = `<option value="">${placeholder || 'Select Services'}</option>`;
+        svc.value = '';
       }
-      const desc = inpDesc.value || 'ITEM';
-      const qty  = inpQty.value  || '1';
-      const wgt  = inpWgt.value  || '0';
-      const vol  = inpVol.value  || '0';
-      const prc  = inpPrc.value  || '0';
-      const amt  = calcAmount(qty, prc);
 
-      // Clone template
-      const frag = document.importNode(tmpl.content, true);
-      const row  = frag.querySelector('tr.cargo-row');
+      let lastMode = null;
+      async function loadSvc(){
+        if (!mode || !svc) return;
+        const m = (mode.value || '').toUpperCase().trim();
+        if (!m){ resetSvc('Select Services'); return; }
 
-      // Isi tampilan
-      row.querySelector('.cell-desc').textContent   = desc;
-      row.querySelector('.cell-qty').textContent    = qty;
-      row.querySelector('.cell-amount').textContent = amt;
+        if (lastMode === m && svc.options.length > 1) {
+          if (INITIAL_SVC) { const ok=[...svc.options].some(o=>o.value===INITIAL_SVC); if(ok) svc.value=INITIAL_SVC; }
+          return;
+        }
+        resetSvc('Loading...');
+        try{
+          const data = await j("{% url 'sales:freight_service_options' %}?mode="+encodeURIComponent(m));
+          const list = Array.isArray(data) ? data : (data.options || data.items || []);
+          resetSvc('Select Services');
+          list.forEach(it=>{
+            let val, lab;
+            if (typeof it==='string'){ val=lab=it; }
+            else if (Array.isArray(it)){ val=it[0]; lab=it[1]??it[0]; }
+            else if (it && typeof it==='object'){ val=it.value??it.code??it.key; lab=it.label??it.name??val; }
+            if (val) svc.add(new Option(String(lab), String(val)));
+          });
+          if (INITIAL_SVC) {
+            const ok = [...svc.options].some(o=>o.value===INITIAL_SVC);
+            if (ok) svc.value = INITIAL_SVC;
+          }
+          lastMode = m;
+        }catch(e){
+          console.error('loadSvc error:', e); resetSvc('Select Services');
+        }
+      }
 
-      // Isi hidden fields
-      row.querySelector('[name="cargo-__prefix__-description"]').value = desc;
-      row.querySelector('[name="cargo-__prefix__-qty"]').value         = qty;
-      row.querySelector('[name="cargo-__prefix__-weight_kg"]').value   = wgt;
-      row.querySelector('[name="cargo-__prefix__-volume_cbm"]').value  = vol;
-      row.querySelector('[name="cargo-__prefix__-price"]').value       = prc;
-      row.querySelector('[name="cargo-__prefix__-amount"]').value      = amt;
-      row.querySelector('[name="cargo-__prefix__-origin"]').value      = ddOrigin.value;
-      row.querySelector('[name="cargo-__prefix__-destination"]').value = ddDest.value;
+      mode?.addEventListener('change', loadSvc);
+      if ((mode?.value || INITIAL_MODE)) { if (!mode.value && INITIAL_MODE) mode.value = INITIAL_MODE; loadSvc(); }
+      else resetSvc('Select Services');
+    })();
 
-      // Tambah ke tabel
-      rowsWrap.appendChild(frag);
-      reindex();
-    }
+    // ===================== STEP 2 (LINES) =====================
+    (function step2(){
+      const form = document.getElementById('lines-form');
+      if (!form) return; // masih di step header
 
-    // Hapus baris
-    rowsWrap.addEventListener('click', function(ev){
-      const btn = ev.target.closest('.btn-remove'); if (!btn) return;
-      const tr  = btn.closest('tr.cargo-row');
-      tr?.remove();
-      reindex();
-    });
+      const URL_STATE = "{% url 'sales:freight_wizard_state' %}";
+      const URL_LOC   = "{% url 'sales:freight_location_options' %}";
 
-    // Bind tombol
-    addBtn.addEventListener('click', function(ev){
-      ev.preventDefault();
-      addRow();
-    });
+      const addBtn    = document.getElementById('btn-add-cargo');
+      const finishBtn = document.getElementById('btn-finish');
+      const rowsWrap  = document.getElementById('cargo-rows');
+      const tableWrap = document.getElementById('cargo-table-wrap');
+      const emptyHint = document.getElementById('empty-hint');
+      const tmpl      = document.getElementById('cargo-row-template');
 
-    finishBtn.addEventListener('click', function(){
-      reindex(); // rapikan index & TOTAL_FORMS sebelum submit normal
-    });
+      const fOrigin = document.getElementById('add-origin');
+      const fDest   = document.getElementById('add-destination');
+      const fDesc   = document.getElementById('add-desc');
+      const fQty    = document.getElementById('add-qty');
+      const fW      = document.getElementById('add-weight');
+      const fV      = document.getElementById('add-volume');
+      const fP      = document.getElementById('add-price');
+      const fA      = document.getElementById('add-amount');
 
-    // Inisialisasi pertama
-    reindex();
-    console.log('[Lines] ready. TOTAL_FORMS:', totalInput.value);
-  });
+      const totalInp = document.getElementById('id_cargo-TOTAL_FORMS');
+      if (!totalInp){ console.error('id_cargo-TOTAL_FORMS tidak ditemukan'); return; }
+
+      // ----------------- util -----------------
+      function calc(q,p){
+        const qq=parseFloat(q||'0'), pp=parseFloat(p||'0');
+        return (!isNaN(qq)&&!isNaN(pp)) ? (qq*pp).toFixed(2) : '0.00';
+      }
+      function revealRightBox(){ emptyHint.classList.add('d-none'); tableWrap.classList.remove('d-none'); finishBtn?.classList.remove('d-none'); }
+      function reindexRows(){
+        const rows=[...rowsWrap.querySelectorAll('tr.cargo-row')];
+        rows.forEach((row,i)=>{
+          row.querySelector('.row-no').textContent = String(i+1);
+          row.querySelectorAll('.d-none [name]').forEach(el=>{ el.name = el.name.replace(/^cargo-\d+-/, `cargo-${i}-`); });
+          row.querySelectorAll('.d-none [id]').forEach(el=>{ el.id   = el.id.replace(/^id_cargo-\d+-/, `id_cargo-${i}-`); });
+        });
+        totalInp.value = String(rows.length);
+        if(rows.length===0){
+          tableWrap.classList.add('d-none'); finishBtn?.classList.add('d-none'); emptyHint.classList.remove('d-none');
+        }
+      }
+
+
+      // ---- isi origin/dest dari server ----
+      function fillSelect(sel, items, placeholder){
+        if (!sel) return;
+        sel.innerHTML = '';
+        sel.add(new Option(placeholder || '-- select --', ''));
+        (items || []).forEach(n => sel.add(new Option(String(n), String(n))));
+        sel.value = '';
+      }
+      function hydrateOD(){
+        try{
+          const el = document.getElementById('loc-data');
+          const data = JSON.parse(el?.textContent || "{}");
+          const o = Array.isArray(data.origin) ? data.origin : [];
+          const d = Array.isArray(data.destination) ? data.destination : [];
+          fillSelect(fOrigin, o, 'Select origin');
+          fillSelect(fDest,   d, 'Select destination');
+        }catch(err){
+          console.error('hydrateOD (context) error:', err);
+          fillSelect(fOrigin, [], 'Select origin');
+          fillSelect(fDest,   [], 'Select destination');
+        }
+      }
+
+      // ---- tambah cargo ----
+      function revealRightBox(){ emptyHint.classList.add('d-none'); tableWrap.classList.remove('d-none'); finishBtn?.classList.remove('d-none'); }
+      function reindexRows(){
+        const rows=[...rowsWrap.querySelectorAll('tr.cargo-row')];
+        rows.forEach((row,i)=>{
+          row.querySelector('.row-no').textContent = String(i+1);
+          row.querySelectorAll('.d-none [name]').forEach(el=>{ el.name = el.name.replace(/^cargo-\d+-/, `cargo-${i}-`); });
+          row.querySelectorAll('.d-none [id]').forEach(el=>{ el.id   = el.id.replace(/^id_cargo-\d+-/, `id_cargo-${i}-`); });
+        });
+        totalInp.value = String(rows.length);
+        if(rows.length===0){ tableWrap.classList.add('d-none'); finishBtn?.classList.add('d-none'); emptyHint.classList.remove('d-none'); }
+      }
+
+
+
+     function addRow(){
+        // validasi input kiri
+        if (!fOrigin?.value || !fDest?.value || !fDesc?.value){
+          alert('Origin, Destination, dan Description wajib diisi.'); 
+          return;
+        }
+        const idx = parseInt(totalInp.value || '0', 10);
+
+        // siapkan baris dari <template>
+        const holder = document.createElement('tbody');
+        holder.innerHTML = tmpl.innerHTML.replaceAll('__prefix__', String(idx)).trim();
+        const row  = holder.firstElementChild;
+        if (!row){ console.error('[AddCargo] template kosong'); return; }
+
+        const root = row.querySelector('.d-none');
+
+        // hitung amount (qty * price)
+        const qty = parseFloat(fQty.value || '0');
+        const prc = parseFloat(fP.value  || '0');
+        const amountVal = (!isNaN(qty) && !isNaN(prc)) ? (qty*prc).toFixed(2) : '0.00';
+        fA.value = amountVal; // update juga input Amount di kiri biar konsisten
+
+        // helper buat id yang sudah terindeks
+        const id = (field) => `#id_cargo-${idx}-${field}`;
+
+        // --- SET HIDDEN INPUTS (pakai id yang sudah benar) ---
+              root.querySelector(id('origin')).value       = fOrigin.value;
+        root.querySelector(id('destination')).value  = fDest.value;
+        root.querySelector(id('description')).value  = fDesc.value;
+        root.querySelector(id('qty')).value          = isNaN(qty) ? 0 : qty;
+        root.querySelector(id('weight_kg')).value    = parseFloat(fW.value || '0') || 0;
+        root.querySelector(id('volume_cbm')).value   = parseFloat(fV.value || '0') || 0;
+        root.querySelector(id('price')).value        = isNaN(prc) ? 0 : prc;
+        root.querySelector(id('amount')).value       = amountVal;
+
+        // --- TAMPILKAN DI CELL TABEL ---
+        row.querySelector('.cell-desc').textContent        = fDesc.value || '';
+        row.querySelector('.cell-origin').textContent      = fOrigin.value || '';
+        row.querySelector('.cell-destination').textContent = fDest.value || '';
+        row.querySelector('.cell-qty').textContent         = isNaN(qty) ? '0' : String(qty);
+        row.querySelector('.cell-weight').textContent      = fW.value || '0';
+        row.querySelector('.cell-volume').textContent      = fV.value || '0';
+        row.querySelector('.cell-price').textContent       = isNaN(prc) ? '0' : String(prc);
+        row.querySelector('.cell-amount').textContent      = amountVal;
+
+        // masukkan baris ke tbody
+        rowsWrap.appendChild(row);
+
+        // tampilkan area kanan & update counter
+        revealRightBox();
+        totalInp.value = String(idx + 1);
+        reindexRows();
+      }
+
+      addBtn?.addEventListener('click', addRow);
+      rowsWrap.addEventListener('click', ev=>{
+        const btn = ev.target.closest('.btn-remove'); if(!btn) return;
+        btn.closest('tr.cargo-row')?.remove(); reindexRows();
+      });
+
+      // panggil hydrate setelah DOM siap
+      hydrateOD();
+    })();
+
+  }); // onReady
 })();
 </script>
 {% endblock %}

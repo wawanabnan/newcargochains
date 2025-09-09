@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% load static %}
+{% block content %}
+<div class="app-wrapper">
+  <div class="content-header">
+    <div class="container-fluid">
+      <h1 class="m-0">Freight Quotation &mdash; Wizard <small class="text-muted">Header</small></h1>
+    </div>
+  </div>
+  <section class="content">
+    <div class="container-fluid">
+      <div class="row">
+        <div class="col-lg-9">
+          <div class="card shadow-sm rounded-3">
+            <div class="card-body">
+              <form method="post" action="{% url 'freight_new' %}" id="wizard-header-form">
+                {% csrf_token %}
+                <div class="row g-3">
+                  <div class="col-md-3">
+                    <label class="form-label">Valid Until</label>
+                    {{ form.valid_until }}
+                  </div>
+                  <div class="col-md-9">
+                    <label class="form-label">Customer</label>
+                    {{ form.customer }}
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Currency</label>
+                    {{ form.currency }}
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Payment Term</label>
+                    {{ form.payment_term }}
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Transport Mode</label>
+                    {{ form.transport_mode }}
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Service Option</label>
+                    <select name="service_option" id="id_service_option" class="form-select"></select>
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label">Notes</label>
+                    {{ form.notes }}
+                  </div>
+                </div>
+                <div class="mt-3 d-flex gap-2">
+                  <a class="btn btn-outline-secondary" href="{% url 'freight_list' %}">Cancel</a>
+                  <button class="btn btn-primary" type="submit">Next &raquo;</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-3">
+          <div class="card shadow-sm rounded-3">
+            <div class="card-body">
+              <h6 class="mb-2">Tips</h6>
+              <ul class="small text-muted mb-0">
+                <li>Service option terisi dinamis berdasar Transport Mode.</li>
+                <li>Langkah berikutnya: tambah Cargo.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+<script>
+(function(){
+  const modeSel = document.getElementById('id_transport_mode');
+  const svcSel = document.getElementById('id_service_option');
+  async function loadOptions() {
+    const m = modeSel.value;
+    svcSel.innerHTML = "";
+    if (!m) return;
+    const r = await fetch("{% url 'freight_service_options' %}?mode=" + encodeURIComponent(m));
+    const d = await r.json();
+    (d.results || []).forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt.id; o.textContent = opt.text;
+      svcSel.appendChild(o);
+    });
+  }
+  modeSel.addEventListener('change', loadOptions);
+  // init on load
+  loadOptions();
+})();
+</script>
+{% endblock %}

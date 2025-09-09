@@ -1,62 +1,100 @@
 # sales/aux_api.py
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
-from django.contrib.auth.decorators import login_required
+from django.apps import apps
 
-from .location_helper import compute_location_types
-from .models import Location  # asumsi model ini sudah ada
+# Import model dari app sales (pastikan model-model ini ada)
+from .models import ModeService, LocationRule
 
-@login_required
+WZ_SESSION_KEY = "fq_wizard"
+
+def _resolve_location_model_and_type_field():
+    """
+    Prefer geo.Location; fallback ke sales.Location.
+    Deteksi field tipe: 'loc_type' atau 'type'.
+    """
+    Location = apps.get_model("geo", "Location") or apps.get_model("sales", "Location")
+    if Location is None:
+        raise RuntimeError("Model Location tidak ditemukan (geo.Location atau sales.Location).")
+    field_names = {f.name for f in Location._meta.fields}
+    type_field = "loc_type" if "loc_type" in field_names else ("type" if "type" in field_names else None)
+    if not type_field:
+        raise RuntimeError("Field tipe lokasi tidak ditemukan (harus 'loc_type' atau 'type').")
+    return Location, type_field
+
+def _choices(qs):
+    return [{"id": x.pk, "text": getattr(x, "name", str(x))} for x in qs]
+
 @require_GET
 def wizard_state(request):
-    # Ambil dari session wizard Anda (nama key disesuaikan; di banyak wizard kita pakai 'freight_wizard')
-    wiz = request.session.get("freight_wizard", {}) or {}
-    header = wiz.get("header", {}) or {}
-    mode = (header.get("transport_mode") or "").upper()
-    service = (header.get("service_option") or "").upper()
-    return JsonResponse({"mode": mode, "service": service})
+    """
+    Kembalikan status wizard dari session + daftar service options (jika mode ada)
+    + rule origin/destination (jika mode+service ada).
+    """
+    state = request.session.get(WZ_SESSION_KEY) or {}
+    step = "header" if not state else "lines"
+    resp = {"ok": True, "step": step, "state": state}
 
-@login_required
+    mode = state.get("transport_mode")
+    service = state.get("service_option")
+
+    if mode:
+        opts = (ModeService.objects
+                .filter(mode__code=mode)
+                .select_related("service")
+                .order_by("service__name"))
+        resp["service_options"] = [{"id": ms.service.code, "text": ms.service.name} for ms in opts]
+
+    if mode and service:
+        try:
+            rule = LocationRule.objects.only("origin_type", "destination_type").get(
+                mode__code=mode, service__code=service
+            )
+            resp["origin_type"] = rule.origin_type
+            resp["destination_type"] = rule.destination_type
+        except LocationRule.DoesNotExist:
+            resp["origin_type"] = None
+            resp["destination_type"] = None
+
+    return JsonResponse(resp)
+
 @require_GET
 def location_options(request):
     """
-    Querystring:
-      role=origin|destination  (wajib)
-      mode=SEA|AIR|LAND|TRUCK|ROAD (opsional; kalau kosong baca dari session)
-      service=P2P|D2P|P2D|D2D     (opsional; kalau kosong baca dari session)
-      q=keyword (opsional filter name__icontains)
-    Return: { "items": ["Jakarta", "Surabaya", ...] }  -> nama saja (tanpa ID)
+    /sales/quotations/freight/api/locations/?mode=SEA&service=D2P&side=origin|destination
+    - Jika side=origin       -> {"items":[...origin...]}
+    - Jika side=destination  -> {"items":[...destination...]}
+    - Jika tanpa side        -> {"ok":true,"origin_type":"CITY","destination_type":"SEAPORT",
+                                 "items_origin":[...],"items_destination":[...]}
     """
-    role = (request.GET.get("role") or "").lower()
-    mode = (request.GET.get("mode") or "").upper()
-    service = (request.GET.get("service") or "").upper()
-    q = (request.GET.get("q") or "").strip()
+    mode = request.GET.get("mode")
+    service = request.GET.get("service")
+    side = (request.GET.get("side") or "").lower().strip()
 
-    if not role in ("origin", "destination"):
-        return JsonResponse({"items": []})
+    if not mode or not service:
+        return JsonResponse({"ok": False, "message": "mode & service wajib diisi", "items": []}, status=400)
 
-    # fallback: kalau mode/service kosong, baca dari session wizard
-    if not (mode and service):
-        wiz = request.session.get("freight_wizard", {}) or {}
-        header = wiz.get("header", {}) or {}
-        mode = mode or (header.get("transport_mode") or "").upper()
-        service = service or (header.get("service_option") or "").upper()
+    try:
+        rule = LocationRule.objects.only("origin_type", "destination_type").get(
+            mode__code=mode, service__code=service
+        )
+    except LocationRule.DoesNotExist:
+        return JsonResponse({"ok": False, "message": "Rule belum tersedia", "items": []}, status=404)
 
-    # Tentukan tipe yg dibutuhkan
-    origin_t, dest_t = compute_location_types(mode, service)
-    need_type = origin_t if role == "origin" else dest_t
+    origin_type, destination_type = rule.origin_type, rule.destination_type
+    Location, type_field = _resolve_location_model_and_type_field()
 
-    # Untuk moda darat, Anda dulu pakai "CITY" atau "JETTY".
-    # Di sini kita ambil keduanya agar dropdown tidak kosong.
-    qs = Location.objects.all()
-    if need_type == "CITY":
-        qs = qs.filter(type__in=["CITY", "JETTY"])
-    else:
-        qs = qs.filter(type=need_type)
+    origins_qs = Location.objects.filter(**{type_field: origin_type}).order_by("name")
+    dests_qs   = Location.objects.filter(**{type_field: destination_type}).order_by("name")
 
-    if q:
-        qs = qs.filter(name__icontains=q)
+    if side in ("origin", "destination"):
+        qs = origins_qs if side == "origin" else dests_qs
+        return JsonResponse({"items": _choices(qs)})
 
-    # Hanya nama yang dikembalikan (sesuai catatan "simpan sebagai nama location")
-    names = list(qs.order_by("name").values_list("name", flat=True)[:200])  # batas atas biar ringan
-    return JsonResponse({"items": names})
+    return JsonResponse({
+        "ok": True,
+        "origin_type": origin_type,
+        "destination_type": destination_type,
+        "items_origin": _choices(origins_qs),
+        "items_destination": _choices(dests_qs),
+    })

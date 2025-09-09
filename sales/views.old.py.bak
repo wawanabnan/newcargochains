@@ -998,4 +998,76 @@ async def _html_to_pdf_playwright_fast(html: str, base_url: str) -> bytes:
 
 
 
-# ========== /FAST PLAYWRIGHT SINGLETON ==========
+def freight_list(request):
+    qs = (FreightQuotation.objects
+          .select_related("customer")
+          .order_by("-date", "-id"))
+
+    # ---- filters (GET) ----
+    number      = (request.GET.get("number") or "").strip()
+    customer_id = (request.GET.get("customer_id") or "").strip()
+    mode        = (request.GET.get("mode") or "").strip()      # "SEA"/"AIR"/"LAND"
+    status      = (request.GET.get("status") or "").strip()
+    service     = (request.GET.get("service") or "").strip()   # "PORT_TO_PORT", dst
+    date_from   = parse_date(request.GET.get("date_from") or "")
+    date_to     = parse_date(request.GET.get("date_to") or "")
+
+    if number:
+        qs = qs.filter(number__icontains=number)
+    if customer_id.isdigit():
+        qs = qs.filter(customer_id=int(customer_id))
+    if mode:
+        qs = qs.filter(transport_mode=mode)
+    if status:
+        qs = qs.filter(status=status)
+    if service:
+        qs = qs.filter(service_option=service)
+    if date_from:
+        qs = qs.filter(date__gte=date_from)
+    if date_to:
+        qs = qs.filter(date__lte=date_to)
+
+    # === dropdown data ===
+    # Customer options (id, label)
+    customer_options = []
+    for c in get_customer_queryset():
+        label = (getattr(c, "name", None)
+                 or getattr(c, "company_name", None)
+                 or getattr(c, "code", None)
+                 or f"Customer #{c.id}")
+        customer_options.append((c.id, label))
+
+    # Mode choices langsung dari model
+    mode_choices = FreightQuotation._meta.get_field("transport_mode").choices or []
+
+    # Service choices: tergantung mode; jika mode kosong -> gabungan semua unik
+    model_service_choices = FreightQuotation._meta.get_field("service_option").choices or []
+    if mode:
+        service_choices = SERVICE_BY_MODE.get(mode, model_service_choices)
+    else:
+        seen = set(); merged = []
+        for k in ("SEA","AIR","LAND"):
+            for code,label in SERVICE_BY_MODE.get(k, []):
+                if code not in seen:
+                    merged.append((code,label))
+                    seen.add(code)
+        service_choices = merged or model_service_choices
+
+    ctx = {
+        "quotations": qs,
+        "filters": {
+            "number": number,
+            "customer_id": customer_id,
+            "mode": mode,
+            "status": status,
+            "service": service,
+            "date_from": request.GET.get("date_from", ""),
+            "date_to": request.GET.get("date_to", ""),
+        },
+        "status_choices": FreightQuotation.STATUS_CHOICES,
+        "customer_options": customer_options,
+        "mode_choices": mode_choices,
+        "service_choices": service_choices,                 # ← sudah terfilter sesuai mode
+        "service_by_mode_json": json.dumps(SERVICE_BY_MODE) # ← untuk JS di template
+    }
+    return render(request, "sales/freight/list.html", ctx)

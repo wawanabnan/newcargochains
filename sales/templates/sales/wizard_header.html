@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Freight Wizard — Header{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <h1 class="h4 mb-3">Freight Quotation — Wizard (Header Information)</h1>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="alert alert-{{ m.tags|default:'info' }} mb-3">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+  {% if form.errors %}
+    <div class="alert alert-danger mb-3"><pre class="mb-0">{{ form.errors }}</pre></div>
+  {% endif %}
+
+  <form method="post" action="{% url 'sales:freight_new' %}" id="wizard-form" class="card shadow-sm">
+    <div class="card-body">
+      {% csrf_token %}
+
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label">Valid Until</label>
+          {{ form.valid_until }}
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Customer</label>
+          {{ form.customer }}
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label">Currency</label>
+          {{ form.currency }}
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Payment Term</label>
+          {{ form.payment_term }}
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label">Freight Types</label>
+          {{ form.transport_mode }}
+        </div>
+
+       <div class="col-md-3">
+        <label class="form-label">Services</label>
+        <select name="service_option" id="id_service_option" class="form-select" required>
+          {% for code, name in service_choices %}
+            <option value="{{ code }}" {% if code == current_service %}selected{% endif %}>{{ name }}</option>
+          {% empty %}
+            <option value="">-- no service available --</option>
+          {% endfor %}
+        </select>
+        <small id="svc_hint" class="text-muted" style="display:none">Loading options…</small>
+      </div>
+
+        <div class="col-12">
+          <label class="form-label">Notes</label>
+          {{ form.notes }}
+        </div>
+      </div>
+    </div>
+
+    <div class="card-footer d-flex gap-2">
+      <button type="submit"  id="btnNext"  class="btn btn-primary">Next</button>
+      <a href="{% url 'sales:freight_new' %}?test=D2D" class="btn btn-warning">Test Data (SEA D2D)</a>
+      <a href="{% url 'sales:freight_new' %}?test=P2P" class="btn btn-info">Test Data (SEA P2P)</a>
+      <a href="{% url 'sales:freight_wizard_reset' %}" class="btn btn-outline-danger ms-auto">Reset</a>
+    </div>
+  </form>
+</div>
+
+<script>
+(function(){
+  const modeSel = document.getElementById('id_transport_mode');
+  const svcSel  = document.getElementById('id_service_option');
+  const btnNext = document.getElementById('btnNext');
+  const hint    = document.getElementById('svc_hint');
+  let ctrl;
+
+  async function reloadServices(){
+    const mode = (modeSel.value || '').trim();
+    if (!mode) return;
+
+    // disable submit saat load
+    btnNext.disabled = true;
+    hint.style.display = 'inline';
+
+    try {
+      if (ctrl) ctrl.abort();
+      ctrl = new AbortController();
+      const url = "{% url 'sales:freight_service_options' %}?mode=" + encodeURIComponent(mode) + "&t=" + Date.now();
+      const r = await fetch(url, {cache:'no-store', signal: ctrl.signal});
+      const d = await r.json();
+
+      // isi ulang options
+      svcSel.innerHTML = '';
+      (d.results || []).forEach(x=>{
+        const o = document.createElement('option');
+        o.value = x.id; o.textContent = x.text;
+        svcSel.appendChild(o);
+      });
+
+      // pilih yang pertama kalau ada
+      if (svcSel.options.length) svcSel.selectedIndex = 0;
+    } catch (e) {
+      console.error('service-options load error:', e);
+    } finally {
+      hint.style.display = 'none';
+      btnNext.disabled = !svcSel.value; // aktifkan lagi jika ada opsi
+    }
+  }
+
+  modeSel.addEventListener('change', reloadServices);
+})();
+</script>
+<!-- Place the first <script> tag in your HTML's <head> -->
+<script src="https://cdn.tiny.cloud/1/klpop8ud5zsip7zloht3kglaf0it7sau7hlm7yfscb3cjxsq/tinymce/8/tinymce.min.js" referrerpolicy="origin" crossorigin="anonymous"></script>
+
+<!-- Place the following <script> and <textarea> tags your HTML's <body> -->
+<script>
+  tinymce.init({
+    selector: '#id_notes',
+    plugins: [
+      // Core editing features
+      'anchor', 'autolink', 'charmap', 'codesample', 'emoticons', 'link', 'lists', 'media', 'searchreplace', 'table', 'visualblocks', 'wordcount',
+      // Your account includes a free trial of TinyMCE premium features
+      // Try the most popular premium features until Sep 22, 2025:
+      'checklist', 'mediaembed', 'casechange', 'formatpainter', 'pageembed', 'a11ychecker', 'tinymcespellchecker', 'permanentpen', 'powerpaste', 'advtable', 'advcode', 'advtemplate', 'ai', 'uploadcare', 'mentions', 'tinycomments', 'tableofcontents', 'footnotes', 'mergetags', 'autocorrect', 'typography', 'inlinecss', 'markdown','importword', 'exportword', 'exportpdf'
+    ],
+    toolbar: 'undo redo | blocks fontfamily fontsize | bold italic underline strikethrough | link media table mergetags | addcomment showcomments | spellcheckdialog a11ycheck typography uploadcare | align lineheight | checklist numlist bullist indent outdent | emoticons charmap | removeformat',
+    tinycomments_mode: 'embedded',
+    tinycomments_author: 'Author name',
+   
+    ai_request: (request, respondWith) => respondWith.string(() => Promise.reject('See docs to implement AI Assistant')),
+    uploadcare_public_key: '9aad4d9817bad2d2e613',
+  });
+</script>
+{% endblock %}

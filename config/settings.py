@@ -71,6 +71,9 @@ TIME_ZONE = 'Asia/Jakarta'
 USE_I18N = True
 USE_TZ = True
 
+DATE_INPUT_FORMATS = ["%d-%m-%Y", "%Y-%m-%d"]  # tambahkan format kamu
+
+
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [

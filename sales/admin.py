@@ -23,3 +23,6 @@ class FreightChargeAdmin(admin.ModelAdmin):
     list_display = ("id","cargo","description","qty","rate","amount")
 
 
+
+
+

@@ -1,117 +1,62 @@
 from django import forms
-from django.utils import timezone
-from django.forms import formset_factory
-from partners.models import CustomerProxy
-from .models import FreightQuotation, FreightCargo, FreightCharge
-from geo.models import Location
-
-TRANSPORT_CHOICES = [
-    ("SEA", "Sea"),
-    ("AIR", "Air"),
-    ("LAND", "Land"),
-]
-
-
-CURRENCY_CHOICES = [
-    ("IDR", "IDR"), ("USD", "USD"), ("EUR", "EUR"),
-    ("JPY", "JPY"), ("SGD", "SGD"), ("AUD", "AUD"),
-    ("MYR", "MYR"), ("CNY", "CNY"),
-]
+from .models import FreightQuotation, TransportMode, ModeService, ServiceOption
 
 PAYMENT_TERM_CHOICES = [
-    ("CASH", "Cash"),
-    ("COD", "Cash on Delivery"),
-    ("TT_ADVANCE", "TT in Advance"),
-    ("NET7", "Net 7"),
-    ("NET14", "Net 14"),
+    ("CASH",  "Cash / Tunai"),
+    ("COD",   "Cash on Delivery"),
     ("NET30", "Net 30"),
+    ("NET45", "Net 45"),
+    ("NET60", "Net 60"),
 ]
 
-
 class FreightHeaderForm(forms.ModelForm):
-    date = forms.DateField(
-        initial=timezone.now().date,
-        widget=forms.DateInput(attrs={"type": "date", "class": "form-control form-control-sm"})
-    )
     transport_mode = forms.ChoiceField(
-        label="Moda Transportasi",
-        choices=TRANSPORT_CHOICES,
-        initial="SEA",
-        widget=forms.Select(attrs={"class":"form-select form-select-sm border-0 bg-transparent p-0"})
+        choices=[], required=True, widget=forms.Select(attrs={"class":"form-select"})
     )
-    
-
-    currency = forms.ChoiceField(
-        label="Currency",
-        choices=CURRENCY_CHOICES,
-        initial="IDR",
-        widget=forms.Select(attrs={"class":"form-select form-select-sm border-0 bg-transparent p-0"})
+    # CharField + validasi ke DB → anti “invalid_choice”
+    service_option = forms.CharField(
+        required=True, widget=forms.TextInput(attrs={"class":"form-control d-none"})  # hidden; dipasok dari <select> custom
     )
     payment_term = forms.ChoiceField(
-        label="Payment Term",
-        choices=PAYMENT_TERM_CHOICES,
-        required=False,
-        widget=forms.Select(attrs={"class":"form-select form-select-sm border-0 bg-transparent p-0"})
+        choices=PAYMENT_TERM_CHOICES, required=True, widget=forms.Select(attrs={"class":"form-select"})
     )
 
     class Meta:
-        model = FreightQuotation
-        fields = ["date", "customer", "currency", "payment_term", "transport_mode","service_option","notes"]
+        model  = FreightQuotation
+        fields = ["valid_until","customer","currency","payment_term","transport_mode","service_option","notes"]
         widgets = {
-            "service_option": forms.Select(attrs={"class": "form-select form-select-sm"}),
-            "date": forms.DateInput(attrs={"class": "form-control form-control-sm", "type": "date"}),
-            "customer": forms.Select(attrs={"class": "form-select form-select-sm"}),
-            "currency": forms.Select(attrs={"class": "form-select form-select-sm"}),
-            "payment_term": forms.TextInput(attrs={"class": "form-control form-control-sm"}),
-            "transport_mode": forms.Select(attrs={"class": "form-select form-select-sm"}),
-            "service_option": forms.Select(attrs={"class": "form-select form-select-sm"}),
-            "customer": forms.Select(attrs={"class":"form-select form-select-sm border-0 bg-transparent p-0"}),
-            "notes": forms.Textarea(attrs={"class": "form-control form-control-sm", "rows": 2}),
+            "valid_until": forms.DateInput(attrs={"type":"date","class":"form-control"}),
+            "customer":    forms.Select(attrs={"class":"form-select"}),
+            "currency":    forms.TextInput(attrs={"class":"form-control"}),
+            "notes": forms.Textarea(attrs={"id": "id_notes", "class": "form-control"}),
         }
 
-        
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if not self.initial.get("date"):
-            self.fields["date"].initial = timezone.localdate() 
+        self.fields["transport_mode"].choices = list(
+            TransportMode.objects.values_list("code","name")
+        )
+        if not self.initial.get("payment_term"):
+            self.fields["payment_term"].initial = "NET30"
 
-        # dropdown customer berisi semua customer
-        self.fields["customer"].queryset = CustomerProxy.objects.all()
+    def clean_service_option(self):
+        """Terima kode (D2D/P2P/…) atau nama ('Port to Port'), normalisasi ke KODE
+        dan validasi bahwa kombinasi (mode, service) ada di ModeService."""
+        raw = (self.cleaned_data.get("service_option") or "").strip()
+        mode = (self.data.get("transport_mode") or self.cleaned_data.get("transport_mode") or "").strip()
+        if not raw or not mode:
+            raise forms.ValidationError("Service option wajib diisi.")
 
-# --- Freight forms (clean) ---
-class FreightCargoForm(forms.ModelForm):
-    # queryset akan di-set di views sesuai transport_mode
-    origin = forms.ModelChoiceField(
-        queryset=Location.objects.none(), required=False,
-        widget=forms.Select(attrs={"class": "form-select form-select-sm border-0 bg-transparent p-0"})
-    )
-    destination = forms.ModelChoiceField(
-        queryset=Location.objects.none(), required=False,
-        widget=forms.Select(attrs={"class": "form-select form-select-sm border-0 bg-transparent p-0"})
-    )
+        # cocok sebagai kode
+        if ModeService.objects.filter(mode__code__iexact=mode, service__code__iexact=raw).exists():
+            return raw.upper()
 
-    class Meta:
-        model = FreightCargo
-        fields = ["description","qty","weight_kg","volume_cbm","price","amount","origin","destination"]
-        widgets = {
-            "description": forms.TextInput(attrs={"class": "form-control form-control-sm border-0 bg-transparent p-0"}),
-            "qty": forms.NumberInput(attrs={"class": "form-control form-control-sm border-0 bg-transparent p-0 text-end","value":"1"}),
-            "weight_kg": forms.NumberInput(attrs={"class": "form-control form-control-sm border-0 bg-transparent p-0 text-end"}),
-            "volume_cbm": forms.NumberInput(attrs={"class": "form-control form-control-sm border-0 bg-transparent p-0 text-end"}),
-            "price": forms.NumberInput(attrs={"class": "form-control form-control-sm border-0 bg-transparent p-0 text-end"}),
-            "amount": forms.NumberInput(attrs={"class": "form-control form-control-sm border-0 bg-transparent p-0 text-end"}),
-        }
+        # cocok sebagai nama
+        try:
+            svc = ServiceOption.objects.get(name__iexact=raw)
+            if ModeService.objects.filter(mode__code__iexact=mode, service=svc).exists():
+                return svc.code
+        except ServiceOption.DoesNotExist:
+            pass
 
-class FreightChargeForm(forms.ModelForm):
-    class Meta:
-        model = FreightCharge
-        fields = ["description","qty","rate","amount"]
-        widgets = {
-            "description": forms.TextInput(attrs={"class": "form-control form-control-sm border-0 bg-transparent p-0"}),
-            "qty": forms.NumberInput(attrs={"class": "form-control form-control-sm border-0 bg-transparent p-0 text-end","value":"1"}),
-            "rate": forms.NumberInput(attrs={"class": "form-control form-control-sm border-0 bg-transparent p-0 text-end"}),
-            "amount": forms.NumberInput(attrs={"class": "form-control form-control-sm border-0 bg-transparent p-0 text-end"}),
-        }
-
-CargoFormSet  = formset_factory(FreightCargoForm,  extra=2, min_num=1, validate_min=True)
-ChargeFormSet = formset_factory(FreightChargeForm, extra=2, min_num=0, validate_min=False)
+        raise forms.ValidationError("Service option tidak valid untuk mode tersebut.")

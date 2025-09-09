@@ -1,0 +1,146 @@
+from django.shortcuts import render, redirect, get_object_or_404
+from django.http import JsonResponse
+from django.contrib import messages
+from django.views.decorators.http import require_http_methods
+
+from .forms import FreightHeaderForm, CargoFormSet
+from .models import FreightQuotation, FreightCargo, Location
+
+WZ_SESSION_KEY = "fq_wizard"
+
+# Map Mode+Service -> (origin_type, destination_type)
+MODE_SERVICE_TO_TYPES = {
+    ("SEA", "D2D"): ("CITY", "CITY"),
+    ("SEA", "D2P"): ("CITY", "SEAPORT"),
+    ("SEA", "P2D"): ("SEAPORT", "CITY"),
+    ("SEA", "P2P"): ("SEAPORT", "SEAPORT"),
+    ("AIR", "D2A"): ("CITY", "AIRPORT"),
+    ("AIR", "A2D"): ("AIRPORT", "CITY"),
+    ("INLAND", "TRUCKING"): ("CITY", "CITY"),
+}
+
+SERVICE_OPTIONS_BY_MODE = {
+    "SEA": [("D2D", "Door to Door"), ("D2P", "Door to Port"), ("P2D", "Port to Door"), ("P2P", "Port to Port")],
+    "AIR": [("D2A", "Door to Airport"), ("A2D", "Airport to Door")],
+    "INLAND": [("TRUCKING", "Trucking")],
+}
+
+def _get_rule(mode, service):
+    return MODE_SERVICE_TO_TYPES.get((mode, service))
+
+def _qs_for(location_type):
+    return Location.objects.filter(loc_type=location_type).order_by("name")
+
+
+@require_http_methods(["GET", "POST"])
+def freight_create_wizard(request):
+    state = request.session.get(WZ_SESSION_KEY)
+    step = "header" if not state else "lines"
+
+    if step == "header":
+        if request.method == "POST":
+            form = FreightHeaderForm(request.POST)
+            if form.is_valid():
+                data = form.cleaned_data
+                request.session[WZ_SESSION_KEY] = {
+                    "valid_until": str(data["valid_until"]),
+                    "customer_id": data["customer"].pk,
+                    "currency": data["currency"],
+                    "payment_term": data["payment_term"],
+                    "transport_mode": data["transport_mode"],
+                    "service_option": data["service_option"],
+                    "notes": data.get("notes", ""),
+                }
+                request.session.modified = True
+                return redirect("freight_new")  # lanjut step lines
+        else:
+            form = FreightHeaderForm(initial=state or {})
+        return render(request, "sales/wizard_header.html", {"form": form})
+
+    # step lines
+    mode = state["transport_mode"]
+    service = state["service_option"]
+    rule = _get_rule(mode, service)
+    if not rule:
+        messages.error(request, "Kombinasi transport/service tidak dikenali.")
+        return redirect("freight_new")
+    origin_type, destination_type = rule
+
+    if request.method == "POST":
+        formset = CargoFormSet(request.POST, prefix="cargo")
+        for f in formset.forms:
+            f.fields["origin"].queryset = _qs_for(origin_type)
+            f.fields["destination"].queryset = _qs_for(destination_type)
+        if formset.is_valid():
+            fq = FreightQuotation.objects.create(
+                valid_until=state["valid_until"],
+                customer_id=state["customer_id"],
+                currency=state["currency"],
+                payment_term=state["payment_term"],
+                transport_mode=mode,
+                service_option=service,
+                notes=state.get("notes", ""),
+                status="DRAFT",
+                created_by=request.user if request.user.is_authenticated else None,
+            )
+            objs = []
+            for f in formset.cleaned_data:
+                if f.get("DELETE"): 
+                    continue
+                objs.append(FreightCargo(
+                    quotation=fq,
+                    origin=f["origin"],
+                    destination=f["destination"],
+                    description=f["description"],
+                    qty=f["qty"],
+                    weight=f.get("weight") or 0,
+                    volume=f.get("volume") or 0,
+                    price=f["price"],
+                    amount=f["amount"],
+                ))
+            if objs:
+                FreightCargo.objects.bulk_create(objs)
+            try:
+                del request.session[WZ_SESSION_KEY]
+            except KeyError:
+                pass
+            messages.success(request, "Quotation dibuat. Silakan lengkapi Charges.")
+            return redirect("freight_charges", pk=fq.pk)
+    else:
+        formset = CargoFormSet(prefix="cargo", initial=[{}])
+        for f in formset.forms:
+            f.fields["origin"].queryset = _qs_for(origin_type)
+            f.fields["destination"].queryset = _qs_for(destination_type)
+
+    return render(request, "sales/wizard_lines.html", {
+        "formset": formset,
+        "origin_type": origin_type,
+        "destination_type": destination_type,
+        "mode": mode,
+        "service": service,
+    })
+
+
+@require_http_methods(["GET"])
+def freight_service_options(request):
+    mode = request.GET.get("mode")
+    choices = SERVICE_OPTIONS_BY_MODE.get(mode) or []
+    return JsonResponse({"results": [{"id": k, "text": v} for k, v in choices]})
+
+
+@require_http_methods(["GET"])
+def freight_location_options(request):
+    mode = request.GET.get("mode")
+    service = request.GET.get("service")
+    rule = _get_rule(mode, service)
+    if not rule:
+        return JsonResponse({"ok": False, "message": "Rule not found"}, status=400)
+    o, d = rule
+    def _choices(qs): return [{"id": x.pk, "text": x.name} for x in qs]
+    return JsonResponse({
+        "ok": True,
+        "origin_type": o,
+        "destination_type": d,
+        "origins": _choices(_qs_for(o)),
+        "destinations": _choices(_qs_for(d)),
+    })

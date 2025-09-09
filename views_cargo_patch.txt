@@ -1,0 +1,20 @@
+
+# Replace the cargo creation block inside STEP 2 (Lines) with this:
+
+rows = []
+for row in formset.cleaned_data:
+    if not row or row.get("DELETE"):
+        continue
+    rows.append(FreightCargo(
+        quotation=fq,
+        origin=row["origin"],
+        destination=row["destination"],
+        description=row.get("description",""),
+        qty=row.get("qty") or 0,
+        weight_kg=row.get("weight_kg") or 0,
+        volume_cbm=row.get("volume_cbm") or 0,
+        price=row.get("price") or 0,
+        amount=row.get("amount") or 0,
+    ))
+if rows:
+    FreightCargo.objects.bulk_create(rows)

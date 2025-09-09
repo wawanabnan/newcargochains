@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Freight Wizard — Lines{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <h1 class="h4 mb-3">Freight Quotation — Wizard <span class="text-muted">Lines</span></h1>
+  <p class="small text-muted mb-3">
+    Mode: <strong>{{ mode }}</strong> • Service: <strong>{{ service }}</strong> •
+    Origin type: <strong>{{ origin_type }}</strong> • Destination type: <strong>{{ destination_type }}</strong>
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="alert alert-{{ m.tags|default:'info' }}">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <form method="post" id="lines-form">
+    {% csrf_token %}
+    {{ formset.management_form }} {# WAJIB berada di dalam form #}
+
+    <div id="cargo-cards" class="d-grid gap-3">
+      {% for form in formset %}
+        <div class="card cargo-card">
+          <div class="card-body">
+            <div class="row g-3">
+              <!-- Baris 1 -->
+              <div class="col-md-6">
+                <label class="form-label">Description</label>
+                {{ form.description }}
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Weight (kg)</label>
+                {{ form.weight_kg }}
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Volume (cbm)</label>
+                {{ form.volume_cbm }}
+              </div>
+
+              <!-- Baris 2 -->
+              <div class="col-md-4">
+                <label class="form-label">Qty</label>
+                {{ form.qty }}
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Price</label>
+                {{ form.price }}
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Amount</label>
+                {{ form.amount }}
+              </div>
+
+              <!-- Baris 3 -->
+              <div class="col-md-6">
+                <label class="form-label">Origin</label>
+                {{ form.origin }}
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Destination</label>
+                {{ form.destination }}
+              </div>
+            </div>
+          </div>
+          <div class="card-footer d-flex justify-content-between align-items-center">
+            {{ form.DELETE }} {# hidden checkbox (can_delete=True) #}
+            <button type="button" class="btn btn-outline-danger btn-remove">Remove</button>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    {# Template card untuk tombol Add (pakai __prefix__) #}
+    <template id="cargo-empty-card">
+      <div class="card cargo-card">
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Description</label>
+              {{ formset.empty_form.description }}
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Weight (kg)</label>
+              {{ formset.empty_form.weight_kg }}
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Volume (cbm)</label>
+              {{ formset.empty_form.volume_cbm }}
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Qty</label>
+              {{ formset.empty_form.qty }}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Price</label>
+              {{ formset.empty_form.price }}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Amount</label>
+              {{ formset.empty_form.amount }}
+            </div>
+
+            <div class="col-md-6">
+              <label class="form-label">Origin</label>
+              {{ formset.empty_form.origin }}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Destination</label>
+              {{ formset.empty_form.destination }}
+            </div>
+          </div>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center">
+          {{ formset.empty_form.DELETE }}
+          <button type="button" class="btn btn-outline-danger btn-remove">Remove</button>
+        </div>
+      </div>
+    </template>
+
+    <div class="mt-3 d-flex gap-2">
+      <a href="{% url 'sales:freight_new' %}?step=header" class="btn btn-light">« Back</a>
+      <a href="{% url 'sales:freight_wizard_reset' %}" class="btn btn-outline-secondary">Cancel</a>
+      <button type="button" id="add-card" class="btn btn-primary">Add Cargo</button>
+      <button type="submit" class="btn btn-success ms-auto">Finish »</button>
+    </div>
+  </form>
+</div>
+
+<script>
+(function(){
+  const WRAP  = document.getElementById('cargo-cards');
+  const ADD   = document.getElementById('add-card');
+  const TPL   = document.getElementById('cargo-empty-card');
+  const TOTAL = document.getElementById('id_cargo-TOTAL_FORMS'); // prefix "cargo"
+
+  function bindAutoAmount(card){
+    const qty   = card.querySelector('input[name$="-qty"]');
+    const price = card.querySelector('input[name$="-price"]');
+    const amt   = card.querySelector('input[name$="-amount"]');
+    function calc(){
+      const q = parseFloat(qty.value || '0');
+      const p = parseFloat(price.value || '0');
+      if (!isNaN(q) && !isNaN(p)) amt.value = (q * p).toFixed(2);
+    }
+    if (qty)   qty.addEventListener('input',  calc);
+    if (price) price.addEventListener('input',calc);
+    if (qty)   qty.addEventListener('blur',   calc);
+    if (price) price.addEventListener('blur', calc);
+  }
+
+  function bindRemove(btn){
+    btn.addEventListener('click', function(){
+      const card = this.closest('.cargo-card');
+      const del  = card.querySelector('input[name$="-DELETE"]');
+      if (del) del.checked = true;    // tandai delete
+      card.style.display = 'none';    // sembunyikan (tetap ikut POST)
+    });
+  }
+
+  // bind awal
+  WRAP.querySelectorAll('.cargo-card').forEach(card=>{
+    bindAutoAmount(card);
+    const b = card.querySelector('.btn-remove');
+    if (b) bindRemove(b);
+  });
+
+  ADD.addEventListener('click', function(){
+    const idx = parseInt(TOTAL.value || '0', 10);
+
+    // clone template & ganti __prefix__ -> idx
+    const frag = TPL.content.cloneNode(true);
+    frag.querySelectorAll('[name],[id],label[for]').forEach(el=>{
+      if (el.name) el.name = el.name.replace(/__prefix__/g, idx);
+      if (el.id)   el.id   = el.id.replace(/__prefix__/g, idx);
+      const f = el.getAttribute && el.getAttribute('for');
+      if (f) el.setAttribute('for', f.replace(/__prefix__/g, idx));
+    });
+
+    // kosongkan nilai input/select
+    frag.querySelectorAll('input,select,textarea').forEach(el=>{
+      if (el.type === 'checkbox') { el.checked = false; return; }
+      if (el.tagName === 'SELECT') el.selectedIndex = 0; else el.value = '';
+    });
+
+    WRAP.appendChild(frag);
+    TOTAL.value = idx + 1;     // TOTAL_FORMS hanya NAIK
+
+    // bind untuk card baru
+    const newCard = WRAP.lastElementChild;
+    bindAutoAmount(newCard);
+    newCard.querySelectorAll('.btn-remove').forEach(bindRemove);
+  });
+})();
+</script>
+{% endblock %}
